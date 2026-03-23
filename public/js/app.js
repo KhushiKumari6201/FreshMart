@@ -1,0 +1,834 @@
+/* ═══════════════════════════════════════════════════
+   FreshMart — Main Application (SPA)
+   Admin + User + Payment System
+   ═══════════════════════════════════════════════════ */
+
+const App = {
+  currentRoute: '',
+  checkoutData: null,
+
+  // ── Session ─────────────────────────────────────
+  getUser() {
+    return JSON.parse(localStorage.getItem('freshmart_user') || 'null');
+  },
+  setUser(user) {
+    localStorage.setItem('freshmart_user', JSON.stringify(user));
+    this.updateNav();
+  },
+  isAdmin() {
+    const u = this.getUser();
+    return u && u.role === 'admin';
+  },
+  isLoggedIn() {
+    return !!this.getUser();
+  },
+
+  // ── Init ────────────────────────────────────────
+  init() {
+    window.addEventListener('hashchange', () => this.route());
+    document.getElementById('search-input').addEventListener('input',
+      this.debounce((e) => this.handleSearch(e.target.value), 350)
+    );
+    this.updateNav();
+    this.route();
+    this.updateCartBadge();
+  },
+
+  updateNav() {
+    const user = this.getUser();
+    const loginLink = document.getElementById('nav-login');
+    const userLink = document.getElementById('nav-user');
+    const logoutLink = document.getElementById('nav-logout');
+    const adminLink = document.getElementById('nav-admin');
+    const usernameSpan = document.getElementById('nav-username');
+
+    if (user) {
+      loginLink.style.display = 'none';
+      userLink.style.display = '';
+      logoutLink.style.display = '';
+      usernameSpan.textContent = user.name || 'Profile';
+      adminLink.style.display = user.role === 'admin' ? '' : 'none';
+    } else {
+      loginLink.style.display = '';
+      userLink.style.display = 'none';
+      logoutLink.style.display = 'none';
+      adminLink.style.display = 'none';
+    }
+  },
+
+  logout() {
+    localStorage.removeItem('freshmart_user');
+    this.updateNav();
+    this.showToast('Logged out successfully');
+    window.location.hash = '#/';
+  },
+
+  // ── Router ──────────────────────────────────────
+  route() {
+    const hash = window.location.hash || '#/';
+    const app = document.getElementById('app');
+
+    document.querySelectorAll('.header__nav-link').forEach(l => l.classList.remove('active'));
+    if (hash.startsWith('#/cart')) document.getElementById('nav-cart').classList.add('active');
+    else if (hash.startsWith('#/orders') && !hash.includes('admin')) document.getElementById('nav-orders').classList.add('active');
+    else if (hash.startsWith('#/admin')) document.getElementById('nav-admin').classList.add('active');
+    else if (hash.startsWith('#/login') || hash.startsWith('#/signup')) document.getElementById('nav-login')?.classList.add('active');
+    else if (hash.startsWith('#/profile')) document.getElementById('nav-user')?.classList.add('active');
+    else document.getElementById('nav-home').classList.add('active');
+
+    if (hash === '#/' || hash === '#') this.renderHome(app);
+    else if (hash === '#/login') this.renderLogin(app);
+    else if (hash === '#/signup') this.renderSignup(app);
+    else if (hash === '#/cart') this.renderCart(app);
+    else if (hash === '#/checkout') this.renderCheckout(app);
+    else if (hash === '#/payment') this.renderPayment(app);
+    else if (hash.startsWith('#/confirmation/')) this.renderConfirmation(app, hash.split('/')[2]);
+    else if (hash.startsWith('#/product/')) this.renderProductDetail(app, hash.split('/')[2]);
+    else if (hash === '#/orders') this.renderOrders(app);
+    else if (hash === '#/profile') this.renderProfile(app);
+    else if (hash === '#/admin') this.renderAdminDashboard(app);
+    else if (hash === '#/admin/products') this.renderAdminProducts(app);
+    else if (hash === '#/admin/orders') this.renderAdminOrders(app);
+    else this.renderHome(app);
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  },
+
+  // ── Login Page ──────────────────────────────────
+  renderLogin(container) {
+    container.innerHTML = `
+      <div class="auth-page">
+        <div class="auth-card">
+          <div class="auth-card__icon">👤</div>
+          <h2 class="auth-card__title">Welcome Back</h2>
+          <p class="auth-card__subtitle">Login to your FreshMart account</p>
+          <form id="login-form">
+            <div class="form-group">
+              <label for="login-username">Username</label>
+              <input type="text" id="login-username" placeholder="Enter username" required>
+            </div>
+            <div class="form-group">
+              <label for="login-password">Password</label>
+              <input type="password" id="login-password" placeholder="Enter password" required>
+            </div>
+            <div class="auth-error" id="login-error" style="display:none"></div>
+            <button type="submit" class="btn btn-primary btn-lg" style="width:100%">Login →</button>
+          </form>
+          <p class="auth-card__footer">Don't have an account? <a href="#/signup">Sign Up</a></p>
+          <div class="auth-card__demo">
+            <strong>Demo Accounts:</strong><br>
+            👤 User: signup as new user<br>
+            🔑 Admin: <code>admin</code> / <code>admin123</code>
+          </div>
+        </div>
+      </div>
+    `;
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('login-error');
+      errEl.style.display = 'none';
+      try {
+        const user = await API.login(
+          document.getElementById('login-username').value.trim(),
+          document.getElementById('login-password').value
+        );
+        this.setUser(user);
+        this.updateCartBadge();
+        this.showToast('Welcome back, ' + user.name + '! 🎉');
+        window.location.hash = user.role === 'admin' ? '#/admin' : '#/';
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+      }
+    });
+  },
+
+  // ── Signup Page ──────────────────────────────────
+  renderSignup(container) {
+    container.innerHTML = `
+      <div class="auth-page">
+        <div class="auth-card">
+          <div class="auth-card__icon">🌟</div>
+          <h2 class="auth-card__title">Create Account</h2>
+          <p class="auth-card__subtitle">Join FreshMart for fresh groceries</p>
+          <form id="signup-form">
+            <div class="form-group">
+              <label for="signup-name">Full Name</label>
+              <input type="text" id="signup-name" placeholder="John Doe" required>
+            </div>
+            <div class="form-group">
+              <label for="signup-username">Username</label>
+              <input type="text" id="signup-username" placeholder="Choose a username" required>
+            </div>
+            <div class="form-group">
+              <label for="signup-password">Password</label>
+              <input type="password" id="signup-password" placeholder="Create a password" required>
+            </div>
+            <div class="auth-error" id="signup-error" style="display:none"></div>
+            <button type="submit" class="btn btn-primary btn-lg" style="width:100%">Create Account →</button>
+          </form>
+          <p class="auth-card__footer">Already have an account? <a href="#/login">Login</a></p>
+        </div>
+      </div>
+    `;
+    document.getElementById('signup-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('signup-error');
+      errEl.style.display = 'none';
+      try {
+        const user = await API.register(
+          document.getElementById('signup-username').value.trim(),
+          document.getElementById('signup-password').value,
+          document.getElementById('signup-name').value.trim()
+        );
+        this.setUser(user);
+        this.showToast('Account created! Welcome, ' + user.name + '! 🎉');
+        window.location.hash = '#/';
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+      }
+    });
+  },
+
+  // ── Home Page ──────────────────────────────────
+  async renderHome(container, category = null, search = null) {
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const [products, categories] = await Promise.all([
+        API.getProducts(category, search), API.getCategories()
+      ]);
+      const emojis = {'Fruits':'🍎','Vegetables':'🥬','Dairy':'🧀','Bakery':'🍞','Beverages':'☕','Snacks':'🍿','Meat & Seafood':'🥩','Pantry Staples':'🥫'};
+      container.innerHTML = `
+        <section class="hero">
+          <h1 class="hero__title">Fresh Groceries,<br>Delivered Fast 🚀</h1>
+          <p class="hero__subtitle">Shop from 50+ premium quality items. From farm-fresh fruits to artisan bakery — everything you need in one place.</p>
+          <a href="#/" class="hero__cta" onclick="document.querySelector('.categories').scrollIntoView({behavior:'smooth'})">Start Shopping →</a>
+        </section>
+        <div class="categories" id="category-filter">
+          <button class="category-chip ${!category ? 'active' : ''}" data-category="">🏷️ All Items</button>
+          ${categories.map(cat => `<button class="category-chip ${category === cat ? 'active' : ''}" data-category="${cat}">${emojis[cat]||'📦'} ${cat}</button>`).join('')}
+        </div>
+        <div>
+          <h2 class="section-title">${category ? (emojis[category]||'') + ' ' + category : '🛍️ All Products'}
+            <span style="font-size:0.9rem;color:var(--clr-text-muted);font-weight:400">(${products.length} items)</span>
+          </h2>
+          ${products.length === 0 ? `<div class="empty-state"><div class="empty-state__icon">🔍</div><h3 class="empty-state__title">No products found</h3><a href="#/" class="btn btn-primary">View All</a></div>` :
+          `<div class="product-grid">${products.map(p => this.renderProductCard(p)).join('')}</div>`}
+        </div>
+      `;
+      container.querySelectorAll('.category-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          this.renderHome(container, chip.dataset.category || null, null);
+          document.getElementById('search-input').value = '';
+        });
+      });
+      container.querySelectorAll('.add-to-cart-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => { e.preventDefault(); this.addToCart(parseInt(btn.dataset.id)); });
+      });
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`;
+    }
+  },
+
+  renderProductCard(p) {
+    return `
+      <div class="product-card">
+        <a href="#/product/${p.id}" class="product-card__image" style="display:flex; text-decoration:none;">
+          <span class="product-card__category">${p.category}</span>
+          <img src="${p.image}" alt="${p.name}" loading="lazy">
+        </a>
+        <div class="product-card__body">
+          <a href="#/product/${p.id}" style="text-decoration:none; color:inherit;">
+            <h3 class="product-card__name" style="transition:var(--transition);">${p.name}</h3>
+          </a>
+          <p class="product-card__desc">${p.description}</p>
+          <div class="product-card__footer">
+            <div><span class="product-card__price">₹${p.price.toFixed(2)}</span><span class="product-card__unit">/ ${p.unit}</span></div>
+            <button class="btn btn-primary btn-sm add-to-cart-btn" data-id="${p.id}">+ Add</button>
+          </div>
+        </div>
+      </div>`;
+  },
+
+  // ── Product Detail Page ──────────────────────────
+  async renderProductDetail(container, id) {
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const product = await API.getProduct(id);
+      container.innerHTML = `
+        <div class="product-detail" style="padding:var(--sp-8) var(--sp-6)">
+          <a href="javascript:history.back()" class="product-detail__back">← Back to Shopping</a>
+          <div class="product-detail__grid">
+            <div class="product-detail__image">
+              <span class="product-detail__category" style="position:absolute;top:var(--sp-4);left:var(--sp-4);z-index:1">${product.category}</span>
+              <img src="${product.image}" alt="${product.name}">
+            </div>
+            <div class="product-detail__info">
+              <h1 class="product-detail__title">${product.name}</h1>
+              <div class="product-detail__price-wrap" style="align-items:center;">
+                <span class="product-detail__price">₹${product.price.toFixed(2)}</span>
+                <span class="product-detail__unit">/ ${product.unit}</span>
+                ${product.inStock ? '<span class="status-badge status-confirmed" style="margin-left:var(--sp-4)">In Stock</span>' : '<span class="status-badge status-cancelled" style="margin-left:var(--sp-4)">Out of Stock</span>'}
+              </div>
+              <p class="product-detail__desc" style="font-size:1.1rem; opacity:0.9;">${product.description}</p>
+              
+              <div class="product-detail__actions">
+                ${product.inStock 
+                  ? `<button class="btn btn-primary btn-lg" onclick="App.addToCart(${product.id}); App.showToast('Added ${product.name} to cart')">🛒 Add to Cart</button>`
+                  : `<button class="btn btn-secondary btn-lg" disabled>Out of Stock</button>`}
+              </div>
+
+              <div class="product-detail__meta">
+                <div class="product-detail__meta-item">
+                  <span>🚀</span>
+                  <div class="product-detail__meta-text">
+                    <strong>Express Delivery</strong>
+                    <p>Delivered in 30-45 minutes to your doorstep.</p>
+                  </div>
+                </div>
+                <div class="product-detail__meta-item">
+                  <span>🛡️</span>
+                  <div class="product-detail__meta-text">
+                    <strong>Quality Guarantee</strong>
+                    <p>100% fresh, hygienic, and thoroughly checked.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    } catch(err) {
+      container.innerHTML = `<div class="empty-state" style="margin-top:var(--sp-12)"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3><a href="#/" class="btn btn-primary" style="margin-top:var(--sp-4)">Go Home</a></div>`;
+    }
+  },
+
+  // ── Cart Page ──────────────────────────────────
+  async renderCart(container) {
+    if (!this.isLoggedIn()) { window.location.hash = '#/login'; return; }
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const cart = await API.getCart();
+      if (cart.items.length === 0) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">🛒</div><h3 class="empty-state__title">Your cart is empty</h3><p class="empty-state__text">Add some fresh groceries!</p><a href="#/" class="btn btn-primary btn-lg">Browse Products</a></div>`;
+        return;
+      }
+      const cnt = cart.items.reduce((s,i)=>s+i.quantity,0);
+      container.innerHTML = `
+        <div class="cart-page">
+          <div class="cart-page__header"><h1 class="section-title">🛒 Your Cart</h1><span style="color:var(--clr-text-muted)">${cnt} item${cnt>1?'s':''}</span></div>
+          <div class="cart-layout">
+            <div class="cart-items">
+              ${cart.items.map(item => `
+                <div class="cart-item">
+                  <div class="cart-item__image"><img src="${item.product.image}" alt="${item.product.name}"></div>
+                  <div class="cart-item__info"><div class="cart-item__name">${item.product.name}</div><div class="cart-item__price">₹${item.product.price.toFixed(2)} / ${item.product.unit}</div></div>
+                  <div class="cart-item__controls">
+                    <div class="cart-item__qty">
+                      <button class="btn-icon qty-btn" data-id="${item.productId}" data-action="decrease">−</button>
+                      <span class="cart-item__qty-val">${item.quantity}</span>
+                      <button class="btn-icon qty-btn" data-id="${item.productId}" data-action="increase">+</button>
+                    </div>
+                    <button class="btn btn-danger btn-sm remove-btn" data-id="${item.productId}">✕</button>
+                  </div>
+                  <div class="cart-item__subtotal">₹${item.subtotal.toFixed(2)}</div>
+                </div>`).join('')}
+            </div>
+            <div class="cart-summary">
+              <h3 class="cart-summary__title">Order Summary</h3>
+              <div class="cart-summary__row"><span>Subtotal</span><span>₹${cart.total.toFixed(2)}</span></div>
+              <div class="cart-summary__row"><span>Delivery Fee</span><span style="color:var(--clr-primary)">FREE</span></div>
+              <div class="cart-summary__row"><span>Tax (est.)</span><span>₹${(cart.total*0.08).toFixed(2)}</span></div>
+              <div class="cart-summary__total"><span>Total</span><span>₹${(cart.total*1.08).toFixed(2)}</span></div>
+              <a href="#/checkout" class="btn btn-primary btn-lg">Proceed to Checkout →</a>
+              <a href="#/" class="btn btn-secondary btn-lg" style="margin-top:var(--sp-3)">Continue Shopping</a>
+            </div>
+          </div>
+        </div>
+      `;
+      container.querySelectorAll('.qty-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = parseInt(btn.dataset.id);
+          const item = cart.items.find(i=>i.productId===id);
+          const nq = btn.dataset.action==='increase'?item.quantity+1:item.quantity-1;
+          if(nq<=0) await API.removeFromCart(id); else await API.updateCartItem(id,nq);
+          this.renderCart(container); this.updateCartBadge();
+        });
+      });
+      container.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await API.removeFromCart(parseInt(btn.dataset.id));
+          this.showToast('Item removed'); this.renderCart(container); this.updateCartBadge();
+        });
+      });
+    } catch (err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  // ── Checkout Page ──────────────────────────────
+  async renderCheckout(container) {
+    if (!this.isLoggedIn()) { window.location.hash = '#/login'; return; }
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const cart = await API.getCart();
+      if (cart.items.length === 0) { window.location.hash = '#/cart'; return; }
+      const user = this.getUser();
+      container.innerHTML = `
+        <div class="checkout-page">
+          <h1 class="section-title">📋 Checkout</h1>
+          <div class="checkout-layout">
+            <form class="checkout-form" id="checkout-form">
+              <h3 style="margin-bottom:var(--sp-6);font-size:var(--fs-lg)">Delivery Details</h3>
+              <div class="form-group"><label>Full Name *</label><input type="text" id="customer-name" placeholder="Your name" value="${user.name||''}" required><span class="error-msg">Required</span></div>
+              <div class="form-group"><label>Phone Number *</label><input type="tel" id="customer-phone" placeholder="+91 98765 43210" required><span class="error-msg">Required</span></div>
+              <div class="form-group"><label>Delivery Address *</label><textarea id="customer-address" placeholder="Full delivery address" required></textarea><span class="error-msg">Required</span></div>
+              <button type="submit" class="btn btn-primary btn-lg" style="width:100%">Continue to Payment →</button>
+            </form>
+            <div class="cart-summary">
+              <h3 class="cart-summary__title">Your Items</h3>
+              ${cart.items.map(item=>`<div class="cart-summary__row"><span>${item.product.name} × ${item.quantity}</span><span>₹${item.subtotal.toFixed(2)}</span></div>`).join('')}
+              <div class="cart-summary__row"><span>Delivery</span><span style="color:var(--clr-primary)">FREE</span></div>
+              <div class="cart-summary__row"><span>Tax</span><span>₹${(cart.total*0.08).toFixed(2)}</span></div>
+              <div class="cart-summary__total"><span>Total</span><span>₹${(cart.total*1.08).toFixed(2)}</span></div>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('checkout-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = document.getElementById('customer-name').value.trim();
+        const phone = document.getElementById('customer-phone').value.trim();
+        const address = document.getElementById('customer-address').value.trim();
+        let valid = true;
+        [['customer-name',name],['customer-phone',phone],['customer-address',address]].forEach(([id,val])=>{
+          const g = document.getElementById(id).closest('.form-group');
+          if(!val){g.classList.add('error');valid=false;}else g.classList.remove('error');
+        });
+        if (!valid) return;
+        this.checkoutData = { customerName: name, phone, address, cartTotal: cart.total };
+        window.location.hash = '#/payment';
+      });
+    } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  // ── Payment Page ──────────────────────────────
+  async renderPayment(container) {
+    if (!this.checkoutData) { window.location.hash = '#/checkout'; return; }
+    const total = (this.checkoutData.cartTotal * 1.08).toFixed(2);
+    container.innerHTML = `
+      <div class="payment-page">
+        <h1 class="section-title">💳 Payment</h1>
+        <p style="color:var(--clr-text-light);margin-bottom:var(--sp-8)">Total Amount: <strong style="font-size:var(--fs-2xl);color:var(--clr-primary-dark)">₹${total}</strong></p>
+        <div class="payment-methods">
+          <h3 style="margin-bottom:var(--sp-4)">Select Payment Method</h3>
+          <div class="payment-option active" data-method="upi">
+            <div class="payment-option__radio"></div>
+            <div class="payment-option__icon">📱</div>
+            <div class="payment-option__info"><div class="payment-option__name">UPI</div><div class="payment-option__desc">Pay with Google Pay, PhonePe, Paytm</div></div>
+          </div>
+          <div class="payment-option" data-method="card">
+            <div class="payment-option__radio"></div>
+            <div class="payment-option__icon">💳</div>
+            <div class="payment-option__info"><div class="payment-option__name">Credit / Debit Card</div><div class="payment-option__desc">Visa, Mastercard, RuPay</div></div>
+          </div>
+          <div class="payment-option" data-method="netbanking">
+            <div class="payment-option__radio"></div>
+            <div class="payment-option__icon">🏦</div>
+            <div class="payment-option__info"><div class="payment-option__name">Net Banking</div><div class="payment-option__desc">All major banks supported</div></div>
+          </div>
+          <div class="payment-option" data-method="cod">
+            <div class="payment-option__radio"></div>
+            <div class="payment-option__icon">💵</div>
+            <div class="payment-option__info"><div class="payment-option__name">Cash on Delivery</div><div class="payment-option__desc">Pay when your order arrives</div></div>
+          </div>
+        </div>
+        <div class="payment-details" id="payment-details">
+          <div id="upi-form" class="payment-form">
+            <div class="form-group"><label>UPI ID</label><input type="text" id="upi-id" placeholder="yourname@upi"></div>
+          </div>
+          <div id="card-form" class="payment-form" style="display:none">
+            <div class="card-preview" id="card-preview"><div class="card-preview__chip"></div><div class="card-preview__number" id="card-display">•••• •••• •••• ••••</div><div class="card-preview__bottom"><span id="card-name-display">YOUR NAME</span><span id="card-expiry-display">MM/YY</span></div></div>
+            <div class="form-group"><label>Card Number</label><input type="text" id="card-number" placeholder="1234 5678 9012 3456" maxlength="19"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)"><div class="form-group"><label>Expiry</label><input type="text" id="card-expiry" placeholder="MM/YY" maxlength="5"></div><div class="form-group"><label>CVV</label><input type="password" id="card-cvv" placeholder="•••" maxlength="3"></div></div>
+            <div class="form-group"><label>Card Holder Name</label><input type="text" id="card-name" placeholder="Name on card"></div>
+          </div>
+          <div id="netbanking-form" class="payment-form" style="display:none">
+            <div class="bank-grid">
+              ${['SBI','HDFC','ICICI','Axis','PNB','Kotak','BOB','Yes Bank'].map(b=>`<label class="bank-option"><input type="radio" name="bank" value="${b}"><span>${b}</span></label>`).join('')}
+            </div>
+          </div>
+          <div id="cod-form" class="payment-form" style="display:none">
+            <div class="cod-notice"><span>💵</span><p>Pay <strong>₹${total}</strong> in cash when your order is delivered. No advance payment needed.</p></div>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-lg" id="pay-btn" style="width:100%;margin-top:var(--sp-6)">Pay ₹${total}</button>
+      </div>
+    `;
+    let selectedMethod = 'upi';
+    container.querySelectorAll('.payment-option').forEach(opt => {
+      opt.addEventListener('click', () => {
+        container.querySelectorAll('.payment-option').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+        selectedMethod = opt.dataset.method;
+        document.querySelectorAll('.payment-form').forEach(f=>f.style.display='none');
+        document.getElementById(selectedMethod+'-form').style.display='';
+        document.getElementById('pay-btn').textContent = selectedMethod==='cod'?'Place Order (COD)':'Pay ₹'+total;
+      });
+    });
+    // Card number live preview
+    const cardNum = document.getElementById('card-number');
+    const cardName = document.getElementById('card-name');
+    const cardExpiry = document.getElementById('card-expiry');
+    cardNum?.addEventListener('input', (e)=>{
+      let v = e.target.value.replace(/\D/g,'').substring(0,16);
+      e.target.value = v.replace(/(.{4})/g,'$1 ').trim();
+      document.getElementById('card-display').textContent = e.target.value||'•••• •••• •••• ••••';
+    });
+    cardName?.addEventListener('input', (e)=>{
+      document.getElementById('card-name-display').textContent = e.target.value.toUpperCase()||'YOUR NAME';
+    });
+    cardExpiry?.addEventListener('input',(e)=>{
+      let v=e.target.value.replace(/\D/g,'').substring(0,4);
+      if(v.length>=2)v=v.substring(0,2)+'/'+v.substring(2);
+      e.target.value=v;
+      document.getElementById('card-expiry-display').textContent=v||'MM/YY';
+    });
+    document.getElementById('pay-btn').addEventListener('click', () => this.processPayment(selectedMethod));
+  },
+
+  async processPayment(method) {
+    const overlay = document.getElementById('payment-overlay');
+    const title = document.getElementById('payment-overlay-title');
+    const text = document.getElementById('payment-overlay-text');
+    overlay.style.display = 'flex';
+    const steps = method === 'cod'
+      ? [['Placing your order...','Confirming items',1000],['Almost done...','',800]]
+      : [['Connecting to payment gateway...','Verifying details',1200],['Processing payment...','Please wait',1500],['Verifying transaction...','Almost done',1000]];
+    for (const [t,tx,ms] of steps) { title.textContent = t; text.textContent = tx; await new Promise(r=>setTimeout(r,ms)); }
+    try {
+      let details = {};
+      if(method==='upi') details={upiId:document.getElementById('upi-id')?.value||''};
+      else if(method==='card') details={last4:(document.getElementById('card-number')?.value||'').slice(-4)};
+      else if(method==='netbanking') details={bank:document.querySelector('input[name=bank]:checked')?.value||''};
+      const order = await API.placeOrder(this.checkoutData.customerName, this.checkoutData.address, this.checkoutData.phone, method, details);
+      title.textContent = '✅ Payment Successful!';
+      text.textContent = '';
+      await new Promise(r=>setTimeout(r,800));
+      overlay.style.display = 'none';
+      this.checkoutData = null;
+      this.updateCartBadge();
+      window.location.hash = '#/confirmation/' + order.id;
+    } catch(err) {
+      overlay.style.display = 'none';
+      this.showToast('Payment failed: ' + err.message);
+    }
+  },
+
+  // ── Confirmation ──────────────────────────────
+  async renderConfirmation(container, orderId) {
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const orders = await API.getOrders();
+      const order = orders.find(o => o.id === parseInt(orderId));
+      if (!order) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">🤷</div><h3>Order not found</h3><a href="#/" class="btn btn-primary">Go Home</a></div>`; return; }
+      const pm = {upi:'UPI',card:'Credit/Debit Card',netbanking:'Net Banking',cod:'Cash on Delivery'};
+      container.innerHTML = `
+        <div class="confirmation-page">
+          <div class="confirmation__icon">✅</div>
+          <h1 class="confirmation__title">Order Placed!</h1>
+          <p class="confirmation__subtitle">Your groceries are on their way. Estimated delivery: 30-45 min.</p>
+          <div class="confirmation__details">
+            <div class="confirmation__detail-row"><span>Order ID</span><span>#${order.id}</span></div>
+            <div class="confirmation__detail-row"><span>Customer</span><span>${order.customerName}</span></div>
+            <div class="confirmation__detail-row"><span>Phone</span><span>${order.phone}</span></div>
+            <div class="confirmation__detail-row"><span>Address</span><span>${order.address}</span></div>
+            <div class="confirmation__detail-row"><span>Payment</span><span style="color:var(--clr-primary);font-weight:600">${pm[order.paymentMethod]||order.paymentMethod}</span></div>
+            <div class="confirmation__detail-row"><span>Status</span><span style="color:var(--clr-primary);font-weight:600">✓ ${order.status.charAt(0).toUpperCase()+order.status.slice(1)}</span></div>
+            <div class="confirmation__items"><h4 style="margin-bottom:var(--sp-3)">Items Ordered</h4>${order.items.map(i=>`<div class="confirmation__item"><span>${i.name} × ${i.quantity}</span><span>₹${i.subtotal.toFixed(2)}</span></div>`).join('')}</div>
+            <div class="confirmation__detail-row" style="margin-top:var(--sp-4)"><span>Total Paid</span><span>₹${(order.total*1.08).toFixed(2)}</span></div>
+          </div>
+          <div style="display:flex;gap:var(--sp-4);justify-content:center;flex-wrap:wrap">
+            <a href="#/" class="btn btn-primary btn-lg">Continue Shopping</a>
+            <a href="#/orders" class="btn btn-secondary btn-lg">View All Orders</a>
+          </div>
+        </div>
+      `;
+    } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  // ── Orders ──────────────────────────────────────
+  async renderOrders(container) {
+    if (!this.isLoggedIn()) { window.location.hash = '#/login'; return; }
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const orders = await API.getOrders();
+      const pm = {upi:'UPI',card:'Card',netbanking:'Net Banking',cod:'COD'};
+      if (orders.length === 0) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">📦</div><h3 class="empty-state__title">No orders yet</h3><a href="#/" class="btn btn-primary btn-lg">Browse Products</a></div>`; return; }
+      container.innerHTML = `
+        <div class="orders-page"><h1 class="section-title">📦 Order History</h1>
+          ${orders.map(order=>`
+            <div class="order-card">
+              <div class="order-card__header"><span class="order-card__id">Order #${order.id}</span><span class="order-card__status status-${order.status}">${order.status.charAt(0).toUpperCase()+order.status.slice(1)}</span></div>
+              <div class="order-card__items">${order.items.map(i=>`${i.name} × ${i.quantity}`).join(' • ')}</div>
+              <div class="order-card__footer">
+                <span style="color:var(--clr-text-muted)">${new Date(order.createdAt).toLocaleDateString('en-IN',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} · ${pm[order.paymentMethod]||order.paymentMethod}</span>
+                <span class="order-card__total">₹${(order.total*1.08).toFixed(2)}</span>
+              </div>
+            </div>`).join('')}
+        </div>
+      `;
+    } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  // ── User Profile Page ──────────────────────────
+  async renderProfile(container) {
+    if (!this.isLoggedIn()) { window.location.hash = '#/login'; return; }
+    const user = this.getUser();
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const orders = await API.getOrders();
+      const totalSpent = orders.reduce((s,o) => s + o.total * 1.08, 0);
+      container.innerHTML = `
+        <div class="profile-page">
+          <div class="profile-header">
+            <div class="profile-avatar">${(user.name||'U').charAt(0).toUpperCase()}</div>
+            <div>
+              <h1 class="profile-name">${user.name}</h1>
+              <p class="profile-username">@${user.username} · <span class="profile-role">${user.role === 'admin' ? '🔑 Admin' : '👤 Customer'}</span></p>
+            </div>
+          </div>
+
+          <div class="profile-stats">
+            <div class="profile-stat"><div class="profile-stat__value">${orders.length}</div><div class="profile-stat__label">Orders</div></div>
+            <div class="profile-stat"><div class="profile-stat__value">₹${totalSpent.toFixed(0)}</div><div class="profile-stat__label">Total Spent</div></div>
+            <div class="profile-stat"><div class="profile-stat__value">${orders.filter(o=>o.status==='delivered').length}</div><div class="profile-stat__label">Delivered</div></div>
+            <div class="profile-stat"><div class="profile-stat__value">${orders.filter(o=>o.status==='confirmed'||o.status==='preparing').length}</div><div class="profile-stat__label">Active</div></div>
+          </div>
+
+          <div class="profile-sections">
+            <div class="profile-section">
+              <h3>📋 Account Information</h3>
+              <div class="profile-info-grid">
+                <div class="profile-info-item"><label>Full Name</label><p>${user.name}</p></div>
+                <div class="profile-info-item"><label>Username</label><p>@${user.username}</p></div>
+                <div class="profile-info-item"><label>Account Type</label><p>${user.role === 'admin' ? 'Administrator' : 'Customer'}</p></div>
+              </div>
+            </div>
+
+            <div class="profile-section">
+              <h3>🔗 Quick Actions</h3>
+              <div class="profile-actions">
+                <a href="#/" class="profile-action-card"><span>🛍️</span><strong>Shop Now</strong><small>Browse products</small></a>
+                <a href="#/cart" class="profile-action-card"><span>🛒</span><strong>My Cart</strong><small>View items</small></a>
+                <a href="#/orders" class="profile-action-card"><span>📦</span><strong>My Orders</strong><small>Track orders</small></a>
+                ${user.role==='admin'?'<a href="#/admin" class="profile-action-card"><span>⚙️</span><strong>Admin Panel</strong><small>Manage store</small></a>':''}
+              </div>
+            </div>
+
+            ${orders.length > 0 ? `
+            <div class="profile-section">
+              <h3>🕐 Recent Orders</h3>
+              <div class="profile-orders">
+                ${orders.slice(0,5).map(o => `
+                  <div class="profile-order-row">
+                    <div><strong>Order #${o.id}</strong><br><small style="color:var(--clr-text-muted)">${new Date(o.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</small></div>
+                    <div style="flex:1; margin: 0 var(--sp-4);">${o.items.map(i=>i.name).join(', ')}</div>
+                    <div style="text-align:right">
+                      <span class="status-badge status-${o.status}" style="margin-bottom:var(--sp-1);display:inline-block">${o.status}</span><br>
+                      <strong style="color:var(--clr-primary-dark)">₹${(o.total*1.08).toFixed(2)}</strong>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+              ${orders.length > 5 ? `<a href="#/orders" class="btn btn-secondary" style="margin-top:var(--sp-4)">View All Orders</a>` : ''}
+            </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  // ══════════ ADMIN PAGES ══════════
+
+  // ── Admin Dashboard ────────────────────────────
+  async renderAdminDashboard(container) {
+    if (!this.isAdmin()) { window.location.hash = '#/login'; return; }
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const stats = await API.getAdminStats();
+      container.innerHTML = `
+        <div class="admin-page">
+          <div class="admin-header"><h1 class="section-title">⚙️ Admin Dashboard</h1><span class="admin-badge">Administrator</span></div>
+          <div class="admin-stats">
+            <div class="stat-card stat-card--products"><div class="stat-card__icon">📦</div><div class="stat-card__value">${stats.totalProducts}</div><div class="stat-card__label">Products</div></div>
+            <div class="stat-card stat-card--orders"><div class="stat-card__icon">🧾</div><div class="stat-card__value">${stats.totalOrders}</div><div class="stat-card__label">Total Orders</div></div>
+            <div class="stat-card stat-card--revenue"><div class="stat-card__icon">💰</div><div class="stat-card__value">₹${stats.totalRevenue.toFixed(0)}</div><div class="stat-card__label">Revenue</div></div>
+            <div class="stat-card stat-card--users"><div class="stat-card__icon">👥</div><div class="stat-card__value">${stats.totalUsers}</div><div class="stat-card__label">Users</div></div>
+          </div>
+          <div class="admin-nav-cards">
+            <a href="#/admin/products" class="admin-nav-card"><span>📦</span><h3>Manage Products</h3><p>Add, edit, or remove products</p></a>
+            <a href="#/admin/orders" class="admin-nav-card"><span>🧾</span><h3>Manage Orders</h3><p>View and update order status</p></a>
+          </div>
+          ${stats.recentOrders.length > 0 ? `
+            <h3 style="margin:var(--sp-8) 0 var(--sp-4)">Recent Orders</h3>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th></tr></thead><tbody>
+              ${stats.recentOrders.map(o=>`<tr><td>#${o.id}</td><td>${o.customerName}</td><td>${o.items.length}</td><td>₹${o.total.toFixed(2)}</td><td>${o.paymentMethod}</td><td><span class="status-badge status-${o.status}">${o.status}</span></td></tr>`).join('')}
+            </tbody></table></div>
+          ` : ''}
+        </div>
+      `;
+    } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  // ── Admin Products ────────────────────────────
+  async renderAdminProducts(container) {
+    if (!this.isAdmin()) { window.location.hash = '#/login'; return; }
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const products = await API.getProducts();
+      container.innerHTML = `
+        <div class="admin-page">
+          <div class="admin-header"><h1 class="section-title">📦 Manage Products</h1><button class="btn btn-primary" id="add-product-btn">+ Add Product</button></div>
+          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Image</th><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>
+            ${products.map(p=>`<tr>
+              <td><img src="${p.image}" alt="${p.name}" class="admin-table__img"></td>
+              <td><strong>${p.name}</strong><br><small>${p.description.substring(0,40)}</small></td>
+              <td>${p.category}</td><td>₹${p.price.toFixed(2)}</td>
+              <td><span class="status-badge ${p.inStock?'status-confirmed':'status-cancelled'}">${p.inStock?'In Stock':'Out'}</span></td>
+              <td><button class="btn btn-sm btn-secondary edit-product-btn" data-id="${p.id}">✏️ Edit</button> <button class="btn btn-sm btn-danger delete-product-btn" data-id="${p.id}">🗑️</button></td>
+            </tr>`).join('')}
+          </tbody></table></div>
+          <a href="#/admin" class="btn btn-secondary" style="margin-top:var(--sp-6)">← Back to Dashboard</a>
+        </div>
+      `;
+      document.getElementById('add-product-btn').addEventListener('click', () => this.showProductModal());
+      container.querySelectorAll('.edit-product-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const p = products.find(x=>x.id===parseInt(btn.dataset.id));
+          if(p) this.showProductModal(p);
+        });
+      });
+      container.querySelectorAll('.delete-product-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if(confirm('Delete this product?')) {
+            await API.deleteProduct(parseInt(btn.dataset.id));
+            this.showToast('Product deleted');
+            this.renderAdminProducts(container);
+          }
+        });
+      });
+    } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  showProductModal(product = null) {
+    const existing = document.getElementById('product-modal');
+    if (existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'product-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <h3>${product?'Edit':'Add'} Product</h3>
+        <form id="product-form">
+          <div class="form-group"><label>Name</label><input type="text" id="p-name" value="${product?.name||''}" required></div>
+          <div class="form-group"><label>Category</label><input type="text" id="p-category" value="${product?.category||''}" placeholder="e.g. Fruits" required></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)">
+            <div class="form-group"><label>Price (₹)</label><input type="number" id="p-price" step="0.01" value="${product?.price||''}" required></div>
+            <div class="form-group"><label>Unit</label><input type="text" id="p-unit" value="${product?.unit||'each'}" required></div>
+          </div>
+          <div class="form-group"><label>Image URL</label><input type="text" id="p-image" value="${product?.image||''}" placeholder="https://..."></div>
+          <div class="form-group"><label>Description</label><textarea id="p-desc">${product?.description||''}</textarea></div>
+          <div style="display:flex;gap:var(--sp-3);justify-content:flex-end">
+            <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">${product?'Save Changes':'Add Product'}</button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('modal-cancel').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if(e.target===modal) modal.remove(); });
+    document.getElementById('product-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = {
+        name: document.getElementById('p-name').value.trim(),
+        category: document.getElementById('p-category').value.trim(),
+        price: parseFloat(document.getElementById('p-price').value),
+        unit: document.getElementById('p-unit').value.trim(),
+        image: document.getElementById('p-image').value.trim(),
+        description: document.getElementById('p-desc').value.trim()
+      };
+      if(product) await API.updateProduct(product.id, data);
+      else await API.addProduct(data);
+      modal.remove();
+      this.showToast(product?'Product updated':'Product added');
+      this.renderAdminProducts(document.getElementById('app'));
+    });
+  },
+
+  // ── Admin Orders ──────────────────────────────
+  async renderAdminOrders(container) {
+    if (!this.isAdmin()) { window.location.hash = '#/login'; return; }
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const orders = await API.getAllOrders();
+      const pm = {upi:'UPI',card:'Card',netbanking:'Net Banking',cod:'COD'};
+      container.innerHTML = `
+        <div class="admin-page">
+          <div class="admin-header"><h1 class="section-title">🧾 All Orders</h1><span style="color:var(--clr-text-muted)">${orders.length} orders</span></div>
+          ${orders.length === 0 ? '<div class="empty-state"><div class="empty-state__icon">📭</div><h3>No orders yet</h3></div>' : `
+          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead><tbody>
+            ${orders.map(o=>`<tr>
+              <td>#${o.id}</td><td>${o.customerName}<br><small>${o.phone}</small></td>
+              <td>${o.items.map(i=>i.name).join(', ')}</td>
+              <td>₹${(o.total*1.08).toFixed(2)}</td>
+              <td>${pm[o.paymentMethod]||o.paymentMethod}</td>
+              <td><span class="status-badge status-${o.status}">${o.status}</span></td>
+              <td><select class="status-select" data-id="${o.id}">
+                ${['confirmed','preparing','delivered','cancelled'].map(s=>`<option value="${s}" ${o.status===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+              </select></td>
+            </tr>`).join('')}
+          </tbody></table></div>`}
+          <a href="#/admin" class="btn btn-secondary" style="margin-top:var(--sp-6)">← Back to Dashboard</a>
+        </div>
+      `;
+      container.querySelectorAll('.status-select').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          await API.updateOrderStatus(parseInt(sel.dataset.id), sel.value);
+          this.showToast('Order status updated');
+          this.renderAdminOrders(container);
+        });
+      });
+    } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  // ── Helpers ────────────────────────────────────
+  async addToCart(productId) {
+    if (!this.isLoggedIn()) { this.showToast('Please login first'); window.location.hash='#/login'; return; }
+    try { await API.addToCart(productId); this.showToast('Added to cart! 🛒'); this.updateCartBadge(); } catch(err) { this.showToast('Failed: '+err.message); }
+  },
+
+  async updateCartBadge() {
+    if (!this.isLoggedIn()) return;
+    try {
+      const {count} = await API.getCartCount();
+      const badge = document.getElementById('cart-badge');
+      if(count>0){badge.textContent=count;badge.style.display='flex';badge.style.animation='none';badge.offsetHeight;badge.style.animation='badgePop 0.4s var(--ease)';}
+      else badge.style.display='none';
+    } catch(e){}
+  },
+
+  showToast(msg) {
+    const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(this._tt); this._tt = setTimeout(()=>t.classList.remove('show'),2500);
+  },
+  handleSearch(q) {
+    const t=q.trim();
+    if(t.length>0){window.location.hash='#/';this.renderHome(document.getElementById('app'),null,t);}
+    else if(window.location.hash==='#/'||window.location.hash==='')this.renderHome(document.getElementById('app'));
+  },
+  debounce(fn,d){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),d);};}
+};
+
+document.addEventListener('DOMContentLoaded', () => App.init());
