@@ -58,15 +58,15 @@
       <div class="footer__links">
         <div class="footer__col">
           <h4>Shop</h4>
-          <a href="#/">All Products</a>
-          <a href="#/">Fruits & Vegetables</a>
-          <a href="#/">Dairy & Bakery</a>
+          <a href="#/" onclick="setTimeout(()=>document.querySelector('.category-chip[data-category=&quot;&quot;]')?.click(), 100)">All Products</a>
+          <a href="#/" onclick="setTimeout(()=>document.querySelector('.category-chip[data-category=&quot;Fruits &amp; Vegetables&quot;]')?.click(), 100)">Fruits & Vegetables</a>
+          <a href="#/" onclick="setTimeout(()=>document.querySelector('.category-chip[data-category=&quot;Dairy&quot;]')?.click(), 100)">Dairy & Bakery</a>
         </div>
         <div class="footer__col">
           <h4>Help</h4>
-          <a href="#">Delivery Info</a>
-          <a href="#">Returns Policy</a>
-          <a href="#">Contact Us</a>
+          <a href="javascript:void(0)" onclick="App.showToast('🚚 Free express delivery available on orders over ₹500!')">Delivery Info</a>
+          <a href="javascript:void(0)" onclick="App.showToast('♻️ 100% money-back guarantee if you are not satisfied.')">Returns Policy</a>
+          <a href="javascript:void(0)" onclick="App.showToast('📞 Contact us 24/7 at support@freshmart.com')">Contact Us</a>
         </div>
         <div class="footer__col">
           <h4>Account</h4>
@@ -75,8 +75,18 @@
           <a href="#/cart">My Cart</a>
         </div>
       </div>
-      <div class="footer__bottom">
-        © 2026 FreshMart. All rights reserved. Made with 💚
+      <div class="footer__bottom" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+        <div>© 2026 FreshMart. All rights reserved. Made with 💚</div>
+        <div style="display:flex; gap:16px; font-size:1.2rem;">
+          <a href="javascript:void(0)" style="text-decoration:none;" title="Facebook">📘</a>
+          <a href="javascript:void(0)" style="text-decoration:none;" title="Twitter">🐦</a>
+          <a href="javascript:void(0)" style="text-decoration:none;" title="Instagram">📸</a>
+        </div>
+        <div style="display:flex; gap:12px; font-size:0.85rem; color:rgba(255,255,255,0.6);">
+          <span>💳 Visa</span>
+          <span>💳 MasterCard</span>
+          <span>🍏 Apple Pay</span>
+        </div>
       </div>
     </div>
   </footer>

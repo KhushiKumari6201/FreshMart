@@ -29,6 +29,20 @@ const App = {
     document.getElementById('search-input').addEventListener('input',
       this.debounce((e) => this.handleSearch(e.target.value), 350)
     );
+    
+    // Add ripple effect for all buttons
+    document.body.addEventListener('click', (e) => {
+      const btn = e.target.closest('.btn');
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const ripple = document.createElement('span');
+      ripple.className = 'ripple';
+      ripple.style.left = `${e.clientX - rect.left}px`;
+      ripple.style.top = `${e.clientY - rect.top}px`;
+      btn.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 600);
+    });
+
     this.updateNav();
     this.route();
     this.updateCartBadge();
@@ -67,6 +81,10 @@ const App = {
   route() {
     const hash = window.location.hash || '#/';
     const app = document.getElementById('app');
+    
+    app.classList.remove('page-transition');
+    void app.offsetWidth;
+    app.classList.add('page-transition');
 
     document.querySelectorAll('.header__nav-link').forEach(l => l.classList.remove('active'));
     if (hash.startsWith('#/cart')) document.getElementById('nav-cart').classList.add('active');
@@ -193,7 +211,12 @@ const App = {
 
   // ── Home Page ──────────────────────────────────
   async renderHome(container, category = null, search = null) {
-    container.innerHTML = '<div class="spinner"></div>';
+    container.innerHTML = `
+      <section class="hero skeleton" style="height:250px; border-radius:16px; margin-bottom:32px; padding:0;"></section>
+      <div class="product-grid">
+        ${Array(8).fill('<div class="product-card skeleton" style="height:350px; background:var(--clr-surface); border:1px solid var(--clr-border-light);"></div>').join('')}
+      </div>
+    `;
     try {
       const [products, categories] = await Promise.all([
         API.getProducts(category, search), API.getCategories()
@@ -201,6 +224,21 @@ const App = {
       const emojis = {'Fruits':'🍎','Vegetables':'🥬','Dairy':'🧀','Bakery':'🍞','Beverages':'☕','Snacks':'🍿','Meat & Seafood':'🥩','Pantry Staples':'🥫'};
       container.innerHTML = `
         <section class="hero">
+          <div class="rotating-badge">
+            <svg viewBox="0 0 100 100">
+              <path id="circlePath" d="M 50, 50 m -35, 0 a 35,35 0 1,1 70,0 a 35,35 0 1,1 -70,0" fill="none" />
+              <text font-size="10" font-weight="800" letter-spacing="2.5">
+                <textPath href="#circlePath" startOffset="0%">100% ORGANIC • GUARANTEED FRESH • </textPath>
+              </text>
+            </svg>
+            <div class="rotating-badge__inner">⭐</div>
+          </div>
+          <div class="hero-floating-icons">
+            <div class="hero-icon" style="top:10%; right:15%; animation-delay:0s">🥑</div>
+            <div class="hero-icon" style="top:40%; right:35%; animation-delay:1.5s; font-size:2.5rem">🛒</div>
+            <div class="hero-icon" style="top:60%; right:10%; animation-delay:2.5s">🥦</div>
+            <div class="hero-icon" style="top:80%; right:45%; animation-delay:4s; font-size:2rem">🧀</div>
+          </div>
           <h1 class="hero__title">Fresh Groceries,<br>Delivered Fast 🚀</h1>
           <p class="hero__subtitle">Shop from 50+ premium quality items. From farm-fresh fruits to artisan bakery — everything you need in one place.</p>
           <a href="#/" class="hero__cta" onclick="document.querySelector('.categories').scrollIntoView({behavior:'smooth'})">Start Shopping →</a>
@@ -214,7 +252,7 @@ const App = {
             <span style="font-size:0.9rem;color:var(--clr-text-muted);font-weight:400">(${products.length} items)</span>
           </h2>
           ${products.length === 0 ? `<div class="empty-state"><div class="empty-state__icon">🔍</div><h3 class="empty-state__title">No products found</h3><a href="#/" class="btn btn-primary">View All</a></div>` :
-          `<div class="product-grid">${products.map(p => this.renderProductCard(p)).join('')}</div>`}
+          `<div class="product-grid">${products.map((p, i) => this.renderProductCard(p, i)).join('')}</div>`}
         </div>
       `;
       container.querySelectorAll('.category-chip').forEach(chip => {
@@ -224,16 +262,48 @@ const App = {
         });
       });
       container.querySelectorAll('.add-to-cart-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => { e.preventDefault(); this.addToCart(parseInt(btn.dataset.id)); });
+        btn.addEventListener('click', (e) => { 
+          e.preventDefault(); 
+          const id = parseInt(btn.dataset.id);
+          const qtyInput = document.getElementById('qty-' + id);
+          const qty = qtyInput ? parseInt(qtyInput.value) || 1 : 1;
+          this.addToCart(id, null, null, qty); 
+          this.flyToCartAnimation(btn);
+        });
       });
+
+      // Initialize 3D Tilt and IntersectionObserver for Staggered Load
+      const cards = container.querySelectorAll('.product-card');
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.style.animationPlayState = 'running';
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.1 });
+
+      cards.forEach((card) => {
+        observer.observe(card);
+        card.addEventListener('mousemove', (e) => {
+          const rect = card.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const rotateX = ((y - rect.height / 2) / (rect.height / 2)) * -12;
+          const rotateY = ((x - rect.width / 2) / (rect.width / 2)) * 12;
+          card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.03) translateY(-10px)`;
+        });
+        card.addEventListener('mouseleave', () => { card.style.transform = ''; });
+      });
+
     } catch (err) {
       container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`;
     }
   },
 
-  renderProductCard(p) {
+  renderProductCard(p, i) {
     return `
-      <div class="product-card">
+      <div class="product-card stagger-${(i % 8) + 1}">
         <a href="#/product/${p.id}" class="product-card__image" style="display:flex; text-decoration:none;">
           <span class="product-card__category">${p.category}</span>
           <img src="${p.image}" alt="${p.name}" loading="lazy">
@@ -245,7 +315,10 @@ const App = {
           <p class="product-card__desc">${p.description}</p>
           <div class="product-card__footer">
             <div><span class="product-card__price">₹${p.price.toFixed(2)}</span><span class="product-card__unit">/ ${p.unit}</span></div>
-            <button class="btn btn-primary btn-sm add-to-cart-btn" data-id="${p.id}">+ Add</button>
+            <div style="display:flex; align-items:center; gap:var(--sp-2);">
+              <input type="number" id="qty-${p.id}" value="1" min="1" max="99" style="width:45px; height:28px; text-align:center; border:2px solid var(--clr-border); border-radius:var(--radius-sm); font-size:var(--fs-sm); outline:none;" onclick="event.preventDefault(); event.stopPropagation();" onfocus="this.style.borderColor='var(--clr-primary)'" onblur="this.style.borderColor='var(--clr-border)'">
+              <button class="btn btn-primary btn-sm add-to-cart-btn" data-id="${p.id}">+ Add</button>
+            </div>
           </div>
         </div>
       </div>`;
@@ -266,17 +339,106 @@ const App = {
             </div>
             <div class="product-detail__info">
               <h1 class="product-detail__title">${product.name}</h1>
-              <div class="product-detail__price-wrap" style="align-items:center;">
-                <span class="product-detail__price">₹${product.price.toFixed(2)}</span>
+              <div class="product-detail__price-wrap" style="align-items:center; margin-bottom:var(--sp-4); padding-bottom:var(--sp-4);">
+                <span class="product-detail__price" id="detail-price">₹${product.price.toFixed(2)}</span>
                 <span class="product-detail__unit">/ ${product.unit}</span>
                 ${product.inStock ? '<span class="status-badge status-confirmed" style="margin-left:var(--sp-4)">In Stock</span>' : '<span class="status-badge status-cancelled" style="margin-left:var(--sp-4)">Out of Stock</span>'}
               </div>
+
+              ${(() => {
+                const isKg = product.unit.toLowerCase() === 'kg';
+                const qualities = [
+                  { name: 'Standard', mult: 1 },
+                  { name: 'Premium Grade A', mult: 1.15 },
+                  { name: '100% Organic', mult: 1.30 }
+                ];
+                const sellers = [
+                  { name: 'FreshMart Direct', add: 0 },
+                  { name: 'GreenValley Farms', add: 15 },
+                  { name: 'Wholesale Co.', add: -5 }
+                ];
+                const weights = isKg ? [
+                  { name: '1 kg', mult: 1 },
+                  { name: '500 g', mult: 0.5 },
+                  { name: '250 g', mult: 0.25 },
+                  { name: '2 kg', mult: 2.0 },
+                  { name: '5 kg', mult: 5.0 }
+                ] : [
+                  { name: 'Standard', mult: 1 }
+                ];
+
+                const inlineLogic = `
+                  const bp = ${product.price};
+                  const qBtn = document.querySelector('.qual-chips .active');
+                  const sBtn = document.querySelector('.sell-chips .active');
+                  const wBtn = document.querySelector('.weight-chips .active');
+                  
+                  const wMult = parseFloat(wBtn.dataset.mult);
+                  const isKg = ${isKg};
+                  const wName = isKg ? ' [' + wBtn.dataset.name + ']' : '';
+                  
+                  const finalPrice = ((bp * parseFloat(qBtn.dataset.mult)) * wMult) + parseFloat(sBtn.dataset.add);
+                  document.getElementById('detail-price').innerText = '₹' + finalPrice.toFixed(2);
+                  document.getElementById('sel-var-name').value = qBtn.dataset.name + wName + ' (Sold by: ' + sBtn.dataset.name + ')';
+                  document.getElementById('sel-var-price').value = finalPrice.toFixed(2);
+                `.replace(/\n/g, ' ');
+
+                return `
+                  <div class="product-variations" style="margin-bottom:var(--sp-6);">
+                    ${isKg ? `
+                    <!-- Weight Section -->
+                    <strong style="display:block;margin-bottom:var(--sp-2);font-size:var(--fs-sm);color:var(--clr-text-light);text-transform:uppercase;letter-spacing:1px;">Weight / Size</strong>
+                    <div style="display:flex;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-5);" class="weight-chips">
+                      ${weights.map((w, i) => `
+                        <button class="category-chip ${i === 0 ? 'active' : ''}" data-name="${w.name}" data-mult="${w.mult}" style="padding:var(--sp-2) var(--sp-4);"
+                          onclick="document.querySelectorAll('.weight-chips .category-chip').forEach(c=>c.classList.remove('active')); this.classList.add('active'); ${inlineLogic}">
+                          ${w.name}
+                        </button>
+                      `).join('')}
+                    </div>
+                    ` : '<div class="weight-chips" style="display:none;"><button class="category-chip active" data-name="Standard" data-mult="1"></button></div>'}
+
+                    <!-- Quality Section -->
+                    <strong style="display:block;margin-bottom:var(--sp-2);font-size:var(--fs-sm);color:var(--clr-text-light);text-transform:uppercase;letter-spacing:1px;">Quality Type</strong>
+                    <div style="display:flex;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-5);" class="qual-chips">
+                      ${qualities.map((q, i) => `
+                        <button class="category-chip ${i === 0 ? 'active' : ''}" data-name="${q.name}" data-mult="${q.mult}" style="padding:var(--sp-2) var(--sp-4);"
+                          onclick="document.querySelectorAll('.qual-chips .category-chip').forEach(c=>c.classList.remove('active')); this.classList.add('active'); ${inlineLogic}">
+                          ${q.name}
+                        </button>
+                      `).join('')}
+                    </div>
+
+                    <!-- Seller Section -->
+                    <strong style="display:block;margin-bottom:var(--sp-2);font-size:var(--fs-sm);color:var(--clr-text-light);text-transform:uppercase;letter-spacing:1px;">Sold By</strong>
+                    <div style="display:flex;gap:var(--sp-3);flex-wrap:wrap;" class="sell-chips">
+                      ${sellers.map((s, i) => `
+                        <button class="category-chip ${i === 0 ? 'active' : ''}" data-name="${s.name}" data-add="${s.add}" style="text-align:left;padding:var(--sp-2) var(--sp-4);height:auto;flex-direction:column;align-items:flex-start;gap:2px;"
+                          onclick="document.querySelectorAll('.sell-chips .category-chip').forEach(c=>c.classList.remove('active')); this.classList.add('active'); ${inlineLogic}">
+                          <div style="font-weight:600;">${s.name}</div>
+                          <div style="font-size:var(--fs-xs);opacity:0.8;">${s.add > 0 ? '+₹'+s.add.toFixed(2) : s.add < 0 ? '-₹'+Math.abs(s.add).toFixed(2) : 'Free'} Delivery</div>
+                        </button>
+                      `).join('')}
+                    </div>
+
+                    <input type="hidden" id="sel-var-name" value="${qualities[0].name}${isKg ? ' ['+weights[0].name+']' : ''} (Sold by: ${sellers[0].name})">
+                    <input type="hidden" id="sel-var-price" value="${((product.price * qualities[0].mult) * weights[0].mult + sellers[0].add).toFixed(2)}">
+                  </div>
+                `;
+              })()}
+
               <p class="product-detail__desc" style="font-size:1.1rem; opacity:0.9;">${product.description}</p>
               
               <div class="product-detail__actions">
                 ${product.inStock 
-                  ? `<button class="btn btn-primary btn-lg" onclick="App.addToCart(${product.id}); App.showToast('Added ${product.name} to cart')">🛒 Add to Cart</button>`
-                  : `<button class="btn btn-secondary btn-lg" disabled>Out of Stock</button>`}
+                  ? `<div style="display:flex; gap:var(--sp-4); width:100%;">
+                       <div style="display:flex; align-items:center; gap:var(--sp-2); border:2px solid var(--clr-border); border-radius:var(--radius-md); padding:0 var(--sp-2);">
+                         <span style="font-weight:600; color:var(--clr-text-light);">Qty:</span>
+                         <input type="number" id="detail-qty" value="1" min="1" max="20" style="width:60px; height:100%; text-align:center; border:none; background:transparent; font-size:var(--fs-lg); font-weight:800; outline:none; color:var(--clr-primary-dark);">
+                       </div>
+                       <button class="btn btn-primary btn-lg" style="flex:1;" onclick="App.addToCart(${product.id}, document.getElementById('sel-var-name') ? document.getElementById('sel-var-name').value : null, document.getElementById('sel-var-price') ? document.getElementById('sel-var-price').value : null, parseInt(document.getElementById('detail-qty').value)||1)">🛒 Add to Cart</button>
+                     </div>`
+                  : `<button class="btn btn-secondary btn-lg" style="width:100%;" disabled>Out of Stock</button>`}
               </div>
 
               <div class="product-detail__meta">
@@ -326,11 +488,11 @@ const App = {
                   <div class="cart-item__info"><div class="cart-item__name">${item.product.name}</div><div class="cart-item__price">₹${item.product.price.toFixed(2)} / ${item.product.unit}</div></div>
                   <div class="cart-item__controls">
                     <div class="cart-item__qty">
-                      <button class="btn-icon qty-btn" data-id="${item.productId}" data-action="decrease">−</button>
+                      <button class="btn-icon qty-btn" data-id="${item.id || item.productId}" data-action="decrease">−</button>
                       <span class="cart-item__qty-val">${item.quantity}</span>
-                      <button class="btn-icon qty-btn" data-id="${item.productId}" data-action="increase">+</button>
+                      <button class="btn-icon qty-btn" data-id="${item.id || item.productId}" data-action="increase">+</button>
                     </div>
-                    <button class="btn btn-danger btn-sm remove-btn" data-id="${item.productId}">✕</button>
+                    <button class="btn btn-danger btn-sm remove-btn" data-id="${item.id || item.productId}">✕</button>
                   </div>
                   <div class="cart-item__subtotal">₹${item.subtotal.toFixed(2)}</div>
                 </div>`).join('')}
@@ -349,8 +511,9 @@ const App = {
       `;
       container.querySelectorAll('.qty-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          const id = parseInt(btn.dataset.id);
-          const item = cart.items.find(i=>i.productId===id);
+          const id = btn.dataset.id;
+          const item = cart.items.find(i=>String(i.id)===id || String(i.productId)===id);
+          if(!item) return;
           const nq = btn.dataset.action==='increase'?item.quantity+1:item.quantity-1;
           if(nq<=0) await API.removeFromCart(id); else await API.updateCartItem(id,nq);
           this.renderCart(container); this.updateCartBadge();
@@ -358,7 +521,7 @@ const App = {
       });
       container.querySelectorAll('.remove-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          await API.removeFromCart(parseInt(btn.dataset.id));
+          await API.removeFromCart(btn.dataset.id);
           this.showToast('Item removed'); this.renderCart(container); this.updateCartBadge();
         });
       });
@@ -804,9 +967,39 @@ const App = {
   },
 
   // ── Helpers ────────────────────────────────────
-  async addToCart(productId) {
+  flyToCartAnimation(button) {
+    const card = button.closest('.product-card') || document.querySelector('.product-detail__image');
+    if (!card) return;
+    const img = card.querySelector('img');
+    if (!img) return;
+    
+    const cartIcon = document.getElementById('nav-cart');
+    const startRect = img.getBoundingClientRect();
+    const endRect = cartIcon.getBoundingClientRect();
+    
+    const flyingImg = img.cloneNode(true);
+    flyingImg.className = 'fly-item';
+    flyingImg.style.left = startRect.left + 'px';
+    flyingImg.style.top = startRect.top + 'px';
+    flyingImg.style.width = startRect.width + 'px';
+    flyingImg.style.height = startRect.height + 'px';
+    
+    const dx = endRect.left - startRect.left + (endRect.width/2) - (startRect.width/2);
+    const dy = endRect.top - startRect.top + (endRect.height/2) - (startRect.height/2);
+    flyingImg.style.setProperty('--dx', dx + 'px');
+    flyingImg.style.setProperty('--dy', dy + 'px');
+    
+    document.body.appendChild(flyingImg);
+    setTimeout(() => flyingImg.remove(), 800);
+  },
+
+  async addToCart(productId, variationName = null, variationPrice = null, quantity = 1) {
     if (!this.isLoggedIn()) { this.showToast('Please login first'); window.location.hash='#/login'; return; }
-    try { await API.addToCart(productId); this.showToast('Added to cart! 🛒'); this.updateCartBadge(); } catch(err) { this.showToast('Failed: '+err.message); }
+    try { 
+      await API.addToCart(productId, variationName, variationPrice, quantity); 
+      this.showToast(`Added ${quantity}x ${variationName ? variationName : 'item'} to cart! 🛒`); 
+      this.updateCartBadge(); 
+    } catch(err) { this.showToast('Failed: '+err.message); }
   },
 
   async updateCartBadge() {

@@ -73,10 +73,10 @@ const API = {
   // Cart
   getCart() { return this.request('/cart'); },
 
-  addToCart(productId) {
+  addToCart(productId, variationName = null, variationPrice = null, quantity = 1) {
     return this.request('/cart', {
       method: 'POST',
-      body: JSON.stringify({ productId })
+      body: JSON.stringify({ productId, variationName, variationPrice, quantity })
     });
   },
 
