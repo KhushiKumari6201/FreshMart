@@ -107,9 +107,53 @@ const App = {
     else if (hash === '#/admin') this.renderAdminDashboard(app);
     else if (hash === '#/admin/products') this.renderAdminProducts(app);
     else if (hash === '#/admin/orders') this.renderAdminOrders(app);
+    else if (hash === '#/delivery') this.renderDelivery(app);
+    else if (hash === '#/returns') this.renderReturns(app);
+    else if (hash === '#/contact') this.renderContact(app);
+    else if (hash.startsWith('#/social/')) this.renderSocial(app, hash.split('/')[2]);
     else this.renderHome(app);
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  },
+
+  // ── Social Media Page ──────────────────────────────────
+  renderSocial(container, platform) {
+    const socialData = {
+      facebook: { name: 'Facebook', icon: '🔵', color: '#1877f2', handle: '@FreshMartOfficial', stats: '50K+ Followers', desc: 'Join our community for daily recipe tips, customer spotlights, and exclusive Facebook-only flash sales!' },
+      twitter: { name: 'Twitter (X)', icon: '🐦', color: '#1da1f2', handle: '@FreshMartApp', stats: '12K+ Followers', desc: 'Follow us for real-time stock updates, quick support, and trending grocery news. We tweet daily fresh arrivals!' },
+      instagram: { name: 'Instagram', icon: '📸', color: '#e1306c', handle: '@freshmart_fresh', stats: '35K+ Followers', desc: 'See the beauty of fresh produce. Tag us in your cooking photos #FreshMartCooks for a chance to get featured!' },
+      linkedin: { name: 'LinkedIn', icon: '💼', color: '#0077b5', handle: 'FreshMart Inc.', stats: '5K+ Professionals', desc: 'Follow our professional journey, career opportunities, and corporate social responsibility initiatives.' },
+      youtube: { name: 'YouTube', icon: '📺', color: '#ff0000', handle: 'FreshMart Kitchen', stats: '100K+ Subscribers', desc: 'Cooking tutorials, farm tours, and behind-the-scenes looks at how we source your fresh groceries.' }
+    };
+
+    const data = socialData[platform] || socialData.facebook;
+
+    container.innerHTML = `
+      <div class="static-page" style="padding:var(--sp-8) var(--sp-6); max-width:800px; margin:0 auto; animation: fadeUp var(--transition) ease;">
+        <div style="text-align:center; margin-bottom:var(--sp-8);">
+          <div style="font-size:4rem; margin-bottom:var(--sp-4);">${data.icon}</div>
+          <h1 class="section-title" style="margin-bottom:var(--sp-2);">FreshMart on ${data.name}</h1>
+          <p style="font-size:1.2rem; color:${data.color}; font-weight:700;">${data.handle}</p>
+          <div style="display:inline-block; padding:var(--sp-1) var(--sp-4); background:var(--clr-surface); border-radius:var(--radius-full); border:1px solid var(--clr-border); margin-top:var(--sp-2); font-weight:600; color:var(--clr-text-light);">${data.stats}</div>
+        </div>
+        
+        <div class="static-content" style="background:var(--clr-surface); padding:var(--sp-8); border-radius:var(--radius-lg); border:1px solid var(--clr-border-light); font-size:1.1rem; line-height:1.7;">
+          <h3 style="margin-bottom:var(--sp-3); color:var(--clr-primary-dark);">About Our ${data.name} Community</h3>
+          <p style="margin-bottom:var(--sp-6);">${data.desc}</p>
+          
+          <div style="background:rgba(0,0,0,0.03); padding:var(--sp-6); border-radius:var(--radius-md); border-left:4px solid ${data.color};">
+            <p style="margin-bottom:var(--sp-4); font-style:italic;">"FreshMart is more than just a store; it's a lifestyle. We love connecting with our community across all platforms to share the joy of fresh food."</p>
+            <strong>— The FreshMart Social Team</strong>
+          </div>
+
+          <div style="margin-top:var(--sp-8); text-align:center;">
+            <a href="javascript:void(0)" class="btn btn-primary btn-lg" style="background:${data.color}; border-color:${data.color};" onclick="App.showToast('Redirecting to official ${data.name} page...')">Follow Us on ${data.name} →</a>
+            <br>
+            <a href="#/" style="display:inline-block; margin-top:var(--sp-4); color:var(--clr-text-muted); text-decoration:none;">← Back to Home</a>
+          </div>
+        </div>
+      </div>
+    `;
   },
 
   // ── Login Page ──────────────────────────────────
@@ -464,6 +508,58 @@ const App = {
     } catch(err) {
       container.innerHTML = `<div class="empty-state" style="margin-top:var(--sp-12)"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3><a href="#/" class="btn btn-primary" style="margin-top:var(--sp-4)">Go Home</a></div>`;
     }
+  },
+
+  // ── Delivery Page ──────────────────────────────────
+  renderDelivery(container) {
+    container.innerHTML = `
+      <div class="static-page" style="padding:var(--sp-8) var(--sp-6); max-width:800px; margin:0 auto; animation: fadeUp var(--transition) ease;">
+        <h1 class="section-title">🚚 Delivery Information</h1>
+        <div class="static-content" style="background:var(--clr-surface); padding:var(--sp-8); border-radius:var(--radius-lg); border:1px solid var(--clr-border-light); font-size:1.1rem; line-height:1.7;">
+          <h3 style="margin-bottom:var(--sp-3); color:var(--clr-primary-dark);">Fast & Reliable Delivery</h3>
+          <p style="margin-bottom:var(--sp-5);">We offer express delivery within 30-45 minutes for all orders. Free express delivery is available on orders over ₹500. We ensure that fresh goods are stored in insulated bags during transit.</p>
+          <h3 style="margin-bottom:var(--sp-3); color:var(--clr-primary-dark);">Delivery Areas</h3>
+          <p style="margin-bottom:var(--sp-5);">Currently, we deliver to all major areas within the city. Check your pincode at checkout to confirm service availability in your area.</p>
+          <h3 style="margin-bottom:var(--sp-3); color:var(--clr-primary-dark);">Scheduling</h3>
+          <p>You can also schedule your delivery for a later time during checkout to ensure you're available to receive your fresh groceries.</p>
+        </div>
+      </div>
+    `;
+  },
+
+  // ── Returns Policy ──────────────────────────────────
+  renderReturns(container) {
+    container.innerHTML = `
+      <div class="static-page" style="padding:var(--sp-8) var(--sp-6); max-width:800px; margin:0 auto; animation: fadeUp var(--transition) ease;">
+        <h1 class="section-title">♻️ Returns & Refunds</h1>
+        <div class="static-content" style="background:var(--clr-surface); padding:var(--sp-8); border-radius:var(--radius-lg); border:1px solid var(--clr-border-light); font-size:1.1rem; line-height:1.7;">
+          <h3 style="margin-bottom:var(--sp-3); color:var(--clr-primary-dark);">100% Satisfaction Guarantee</h3>
+          <p style="margin-bottom:var(--sp-5);">If you're not satisfied with the quality of our products, we offer a 100% money-back guarantee. Your satisfaction is our top priority.</p>
+          <h3 style="margin-bottom:var(--sp-3); color:var(--clr-primary-dark);">How to Return</h3>
+          <p style="margin-bottom:var(--sp-5);">You can initiate a return within 24 hours of delivery. Contact our support team or use the order history page to request a return or report an issue.</p>
+          <h3 style="margin-bottom:var(--sp-3); color:var(--clr-primary-dark);">Refund Process</h3>
+          <p>Refunds are processed immediately upon return approval and will reflect in your original payment method within 3-5 business days. For COD orders, refund will be deposited into your wallet.</p>
+        </div>
+      </div>
+    `;
+  },
+
+  // ── Contact Us ──────────────────────────────────
+  renderContact(container) {
+    container.innerHTML = `
+      <div class="static-page" style="padding:var(--sp-8) var(--sp-6); max-width:800px; margin:0 auto; animation: fadeUp var(--transition) ease;">
+        <h1 class="section-title">📞 Contact Us</h1>
+        <div class="static-content" style="background:var(--clr-surface); padding:var(--sp-8); border-radius:var(--radius-lg); border:1px solid var(--clr-border-light); font-size:1.1rem; line-height:1.7;">
+          <h3 style="margin-bottom:var(--sp-5); color:var(--clr-primary-dark);">Get in Touch</h3>
+          <p style="margin-bottom:var(--sp-5);">We're here to help! Reach out to us anytime regarding any questions, feedback, or issues. We usually reply within an hour.</p>
+          <ul style="list-style:none; padding:0; margin:0;">
+            <li style="margin-bottom:var(--sp-5); display:flex; align-items:center; gap:var(--sp-4);"><span style="font-size:2rem;">📧</span> <div><strong>Email:</strong><br><a href="mailto:support@freshmart.com" style="color:var(--clr-primary); text-decoration:none;">support@freshmart.com</a></div></li>
+            <li style="margin-bottom:var(--sp-5); display:flex; align-items:center; gap:var(--sp-4);"><span style="font-size:2rem;">📱</span> <div><strong>Phone:</strong><br><a href="tel:18001234567" style="color:var(--clr-primary); text-decoration:none;">+91 1800-123-4567</a></div></li>
+            <li style="display:flex; align-items:center; gap:var(--sp-4);"><span style="font-size:2rem;">🕒</span> <div><strong>Hours:</strong><br>24/7 Customer Support</div></li>
+          </ul>
+        </div>
+      </div>
+    `;
   },
 
   // ── Cart Page ──────────────────────────────────
