@@ -106,6 +106,7 @@ const App = {
 
     document.querySelectorAll('.header__nav-link').forEach(l => l.classList.remove('active'));
     if (hash.startsWith('#/cart')) document.getElementById('nav-cart').classList.add('active');
+    else if (hash.startsWith('#/wishlist')) document.getElementById('nav-wishlist').classList.add('active');
     else if (hash.startsWith('#/orders') && !hash.includes('admin')) document.getElementById('nav-orders').classList.add('active');
     else if (hash.startsWith('#/admin')) document.getElementById('nav-admin').classList.add('active');
     else if (hash.startsWith('#/login') || hash.startsWith('#/signup')) document.getElementById('nav-login')?.classList.add('active');
@@ -356,11 +357,19 @@ const App = {
           const rect = card.getBoundingClientRect();
           const x = e.clientX - rect.left;
           const y = e.clientY - rect.top;
-          const rotateX = ((y - rect.height / 2) / (rect.height / 2)) * -12;
-          const rotateY = ((x - rect.width / 2) / (rect.width / 2)) * 12;
-          card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.03) translateY(-10px)`;
+          const rotateX = ((y - rect.height / 2) / (rect.height / 2)) * -18;
+          const rotateY = ((x - rect.width / 2) / (rect.width / 2)) * 18;
+          card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) rotateZ(-2deg) scale(1.04) translateY(-10px)`;
+          
+          // Enhanced dynamic glare effect
+          const gx = (x / rect.width) * 100;
+          const gy = (y / rect.height) * 100;
+          card.style.backgroundImage = `radial-gradient(circle at ${gx}% ${gy}%, rgba(255,255,255,0.1) 0%, transparent 70%), var(--grad-card)`;
         });
-        card.addEventListener('mouseleave', () => { card.style.transform = ''; });
+        card.addEventListener('mouseleave', () => { 
+          card.style.transform = ''; 
+          card.style.backgroundImage = 'var(--grad-card)';
+        });
       });
 
     } catch (err) {
@@ -369,7 +378,7 @@ const App = {
   },
 
   renderProductCard(p, i, isWishlisted = false) {
-    const rating = (Math.random() * (5 - 3.8) + 3.8).toFixed(1);
+    const rating = p.rating || (Math.random() * (5 - 3.8) + 3.8).toFixed(1);
     const delTime = Math.floor(Math.random() * (45 - 20) + 20);
     return `
       <div class="product-card stagger-${(i % 8) + 1} ${!p.inStock ? 'out-of-stock' : ''}">
@@ -388,7 +397,7 @@ const App = {
             <a href="#/product/${p.id}" style="text-decoration:none; color:inherit; flex:1;">
               <h3 class="product-card__name">${p.name}</h3>
             </a>
-            <div style="font-size:var(--fs-xs); background:var(--clr-primary-glow); color:var(--clr-primary-dark); padding:2px 6px; border-radius:4px; font-weight:700;">⭐ ${rating}</div>
+            <div class="rating-badge-animated" style="font-size:var(--fs-xs); background:var(--clr-primary-glow); color:var(--clr-primary-dark); padding:2px 6px; border-radius:4px; font-weight:700; cursor:pointer;" onclick="event.preventDefault(); event.stopPropagation(); App.openRatingModal(${p.id}, '${p.name}', ${rating})">⭐ <span id="rating-val-${p.id}">${rating}</span></div>
           </div>
           <p class="product-card__desc">${p.description || 'Premium quality farm-fresh product.'}</p>
           <div style="font-size:0.7rem; color:var(--clr-text-muted); margin-bottom:var(--sp-4); display:flex; align-items:center; gap:4px;">🕒 Delivery: ${delTime} mins</div>
@@ -532,7 +541,8 @@ const App = {
                          <span style="font-weight:600; color:var(--clr-text-light);">Qty:</span>
                          <input type="number" id="detail-qty" value="1" min="1" max="20" style="width:60px; height:100%; text-align:center; border:none; background:transparent; font-size:var(--fs-lg); font-weight:800; outline:none; color:var(--clr-primary-dark);">
                        </div>
-                       <button class="btn btn-primary btn-lg" style="flex:1;" onclick="App.addToCart(${product.id}, document.getElementById('sel-var-name') ? document.getElementById('sel-var-name').value : null, document.getElementById('sel-var-price') ? document.getElementById('sel-var-price').value : null, parseInt(document.getElementById('detail-qty').value)||1, this)">🛒 Add to Cart</button>
+                       <button class="btn btn-secondary btn-lg" style="flex:1;" onclick="App.addToCart(${product.id}, document.getElementById('sel-var-name') ? document.getElementById('sel-var-name').value : null, document.getElementById('sel-var-price') ? document.getElementById('sel-var-price').value : null, parseInt(document.getElementById('detail-qty').value)||1, this)">🛒 Add to Cart</button>
+                       <button class="btn btn-primary btn-lg" style="flex:1;" onclick="App.buyNow(${product.id}, document.getElementById('sel-var-name') ? document.getElementById('sel-var-name').value : null, document.getElementById('sel-var-price') ? document.getElementById('sel-var-price').value : null, parseInt(document.getElementById('detail-qty').value)||1)">⚡ Buy Now</button>
                      </div>`
                   : `<button class="btn btn-secondary btn-lg" style="width:100%;" disabled>Out of Stock</button>`}
               </div>
@@ -1043,7 +1053,55 @@ const App = {
       btn.classList.toggle('active', res.added);
       btn.innerHTML = res.added ? '❤️' : '🤍';
       this.showToast(res.added ? 'Added to Wishlist' : 'Removed from Wishlist');
+      // If we are on the wishlist page, we should re-render or remove the item
+      if(window.location.hash === '#/wishlist') this.renderWishlist(document.getElementById('app'));
     } catch(err) { this.showToast('Failed to update wishlist'); }
+  },
+
+  async renderWishlist(container) {
+    if (!this.isLoggedIn()) { window.location.hash = '#/login'; return; }
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const wishlist = await API.getWishlist();
+      if (wishlist.length === 0) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">❤️</div><h3 class="empty-state__title">Your wishlist is empty</h3><a href="#/" class="btn btn-primary btn-lg">Browse Products</a></div>`;
+        return;
+      }
+      container.innerHTML = `
+        <div class="wishlist-page">
+          <h1 class="section-title">❤️ My Wishlist</h1>
+          <div class="product-grid" id="wishlist-grid">
+            ${wishlist.map((p, i) => this.renderProductCard(p, i, true)).join('')}
+          </div>
+        </div>
+      `;
+      // Listeners for cards in wishlist
+      const grid = document.getElementById('wishlist-grid');
+      grid.querySelectorAll('.add-to-cart-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const id = parseInt(btn.dataset.id);
+          const qty = parseInt(document.getElementById('qty-' + id).value) || 1;
+          this.addToCart(id, null, null, qty, btn);
+          this.flyToCartAnimation(btn);
+        });
+      });
+      
+      const cards = grid.querySelectorAll('.product-card');
+      const obs = new IntersectionObserver(e => e.forEach(en => en.isIntersecting && en.target.classList.add('visible')), {threshold:0.1});
+      cards.forEach(card => {
+        obs.observe(card);
+        card.addEventListener('mousemove', e => {
+          const rect = card.getBoundingClientRect();
+          const rx = ((e.clientY - rect.top - rect.height/2)/(rect.height/2))*-18;
+          const ry = ((e.clientX - rect.left - rect.width/2)/(rect.width/2))*18;
+          card.style.transform = `perspective(1000px) rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(-2deg) scale(1.04) translateY(-10px)`;
+          const gx = ((e.clientX-rect.left)/rect.width)*100, gy = ((e.clientY-rect.top)/rect.height)*100;
+          card.style.backgroundImage = `radial-gradient(circle at ${gx}% ${gy}%, rgba(255,255,255,0.1) 0%, transparent 70%), var(--grad-card)`;
+        });
+        card.addEventListener('mouseleave', () => { card.style.transform = ''; card.style.backgroundImage = 'var(--grad-card)'; });
+      });
+    } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
   },
 
   // ── Orders ──────────────────────────────────────
@@ -1180,11 +1238,12 @@ const App = {
       container.innerHTML = `
         <div class="admin-page">
           <div class="admin-header"><h1 class="section-title">📦 Manage Products</h1><button class="btn btn-primary" id="add-product-btn">+ Add Product</button></div>
-          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Image</th><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>
+          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Image</th><th>Name</th><th>Category</th><th>Price</th><th>Rating</th><th>Stock</th><th>Actions</th></tr></thead><tbody>
             ${products.map(p=>`<tr>
               <td><img src="${p.image}" alt="${p.name}" class="admin-table__img"></td>
               <td><strong>${p.name}</strong><br><small>${p.description.substring(0,40)}</small></td>
               <td>${p.category}</td><td>₹${p.price.toFixed(2)}</td>
+              <td>⭐ ${p.rating||'-'}</td>
               <td><span class="status-badge ${p.inStock?'status-confirmed':'status-cancelled'}">${p.inStock?'In Stock':'Out'}</span></td>
               <td><button class="btn btn-sm btn-secondary edit-product-btn" data-id="${p.id}">✏️ Edit</button> <button class="btn btn-sm btn-danger delete-product-btn" data-id="${p.id}">🗑️</button></td>
             </tr>`).join('')}
@@ -1229,6 +1288,7 @@ const App = {
           </div>
           <div class="form-group"><label>Image URL</label><input type="text" id="p-image" value="${product?.image||''}" placeholder="https://..."></div>
           <div class="form-group"><label>Description</label><textarea id="p-desc">${product?.description||''}</textarea></div>
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;"><input type="checkbox" id="p-instock" ${product?.inStock !== false ? 'checked' : ''} style="width:20px;height:20px;"> <label for="p-instock" style="margin:0">Item is In Stock</label></div>
           <div style="display:flex;gap:var(--sp-3);justify-content:flex-end">
             <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
             <button type="submit" class="btn btn-primary">${product?'Save Changes':'Add Product'}</button>
@@ -1247,7 +1307,8 @@ const App = {
         price: parseFloat(document.getElementById('p-price').value),
         unit: document.getElementById('p-unit').value.trim(),
         image: document.getElementById('p-image').value.trim(),
-        description: document.getElementById('p-desc').value.trim()
+        description: document.getElementById('p-desc').value.trim(),
+        inStock: document.getElementById('p-instock').checked
       };
       if(product) await API.updateProduct(product.id, data);
       else await API.addProduct(data);
@@ -1445,26 +1506,149 @@ const App = {
       addMsg(q, false);
       input.value = '';
 
-      setTimeout(() => {
-        let reply = "I'm sorry, I'm still learning. Try asking about 'breakfast' or 'deals'!";
+      try {
+        const products = await API.getProducts();
         const lq = q.toLowerCase();
-        if(lq.includes('breakfast')){
-          reply = "For a healthy breakfast, I recommend our 'Organic Avocados' (₹120) and 'Greek Yogurt' (₹85) with some 'Artisan Sourdough bread' (₹95)! 🥑🥣";
-        } else if(lq.includes('deals') || lq.includes('offer') || lq.includes('discount') || lq.includes('coupon')){
-          reply = "Use code 'SAVE10' for 10% off! Also, checkout our 'Weekly Specials' on the home page! 🍌";
-        } else if(lq.includes('hello') || lq.includes('hi')){
-          reply = "Hello! Looking for something fresh today? I can suggest recipes or tell you our latest deals! 👋";
-        } else if(lq.includes('order') || lq.includes('status') || lq.includes('track')){
-          reply = "You can track your order in the 'Orders' section! If it says 'Ordered', we're currently packing it! 📦";
-        } else if(lq.includes('delivery')){
-          reply = "We usually deliver within 30-45 minutes. Our riders are super fast! 🚚💨";
+        let reply = "I'm sorry, I'm still learning. Try asking about a product price or health tips! 🍎";
+
+        const healthTips = {
+          'apple': 'Apples are high in Vitamin C and fiber, making them perfect for heart health! 🍎',
+          'orange': 'Oranges are packed with Vitamin C and antioxidants to boost your immunity! 🍊',
+          'banana': 'Bananas are rich in Potassium and great for quick energy! 🍌',
+          'milk': 'Fresh milk is an excellent source of Calcium and Vitamin D for strong bones! 🥛',
+          'spinach': 'Spinach is a superfood rich in Iron, Folate, and Vitamin K! 🥬',
+          'broccoli': 'Broccoli is nutrient-dense and high in fiber and Vitamin C! 🥦',
+          'carrot': 'Carrots are loaded with Beta-carotene and Vitamin A for eye health! 🥕',
+          'salmon': 'Salmon is rich in Omega-3 fatty acids, excellent for your heart and brain! 🐟',
+          'egg': 'Eggs provide high-quality protein and essential B-vitamins! 🥚',
+          'mango': 'Mangoes are high in Vitamin A and C, great for skin and digestion! 🥭',
+          'chicken': 'Chicken is a lean source of protein to help build and repair muscles! 🍗',
+          'almond': 'Almonds are heart-healthy with good fats and Vitamin E! 🥜',
+          'curd': 'Curd/Yogurt contains probiotics that improve gut health! 🥣',
+          'pantry': 'Our pantry staples are sourced from organic farms ensuring high nutritional value!'
+        };
+
+        const nutritionData = {
+          'apple': 'Calories: 95, Fat: 0.3g, Carbs: 25g',
+          'banana': 'Calories: 105, Fat: 0.4g, Protein: 1.3g',
+          'orange': 'Calories: 62, Fat: 0.2g, Vitamin C: 70mg',
+          'milk': 'Calories: 150 (per cup), Fat: 8g, Protein: 8g',
+          'chicken': 'Calories: 165 (per 100g), Fat: 3.6g, Protein: 31g',
+          'salmon': 'Calories: 208 (per 100g), Fat: 13g, Protein: 20g',
+          'egg': 'Calories: 78, Fat: 5g, Protein: 6g',
+          'spinach': 'Calories: 23 (per 100g), Fat: 0.4g, Protein: 2.9g',
+          'broccoli': 'Calories: 34 (per 100g), Fat: 0.4g, Protein: 2.8g',
+          'mango': 'Calories: 202, Fat: 1.3g, Fiber: 5g'
+        };
+
+        const found = products.find(p => lq.includes(p.name.toLowerCase()));
+        
+        // Health / Vitamin checks
+        const healthKeywords = ['health', 'benefit', 'vitamin', 'good for', 'nutrition', 'healthy', 'why should i buy'];
+        const isHealthQuery = healthKeywords.some(k => lq.includes(k));
+        
+        // Calorie / Fat / Macro checks
+        const macroKeywords = ['calorie', 'fat', 'protein', 'carbs', 'macros', 'energy', 'diet'];
+        const isMacroQuery = macroKeywords.some(k => lq.includes(k));
+
+        if (found && (isHealthQuery || isMacroQuery)) {
+          const key = Object.keys(healthTips).find(k => found.name.toLowerCase().includes(k));
+          const healthText = healthTips[key] || `${found.name} is a healthy, fresh choice! ✨`;
+          const nutritionText = nutritionData[key] || 'Detailed macro data for this specific product is coming soon!';
+          reply = `${healthText}\n\n📊 Nutritional Info:\n${nutritionText}`;
+        } else if (found && (lq.includes('price') || lq.includes('much') || lq.includes('cost'))) {
+          reply = `The ${found.name} is ₹${found.price.toFixed(2)} / ${found.unit}. It's currently ${found.inStock ? 'in stock' : 'out of stock'}. 🛒`;
+        } else if (found) {
+          reply = `${found.name}: ${found.description} (₹${found.price.toFixed(2)}). It's very fresh! ✨`;
+        } else if (isHealthQuery || isMacroQuery) {
+          reply = "Most of our produce is low in calories and high in nutrients! For example, Spinach (23 cal/100g) is very low-fat, while Salmon (208 cal/100g) is a powerhouse of protein and healthy fats. Which item are you looking for? 🥗";
+        } else if (lq.includes('breakfast')) {
+          const item = products.find(p => p.name.includes('Bread') || p.name.includes('Milk'));
+          reply = `For breakfast, I recommend our ${item ? item.name : 'Bananas'} and maybe some whole milk! 🥣`;
+        } else if (lq.includes('deal') || lq.includes('offer') || lq.includes('coupon')) {
+          reply = "Use 'SAVE10' for 10% off on orders above ₹500! 🎟️";
+        } else if (lq.includes('hi') || lq.includes('hello')) {
+          reply = "Hello! I'm FreshBot. Ask me about any product price, health benefits, or calories (e.g., 'How many calories in a Banana?')! 👋";
+        } else if (lq.includes('order') || lq.includes('track')) {
+          reply = "You can track your active orders under the 'Orders' section in the top menu! 📦";
+        } else if (lq.includes('delivery')) {
+          reply = "We deliver everything within 30-45 minutes to keep it fresh! 🚚💨";
+        } else if (lq.includes('categories') || lq.includes('what do you have')) {
+          const cats = [...new Set(products.map(p=>p.category))];
+          reply = `We have: ${cats.join(', ')}. Which one are you looking for? 🥦`;
         }
-        addMsg(reply, true);
-      }, 800);
+
+        setTimeout(() => {
+          addMsg(reply, true);
+        }, 600);
+      } catch (err) {
+        setTimeout(() => addMsg("I'm having trouble connecting to the store right now. Please try again later! 🔌", true), 600);
+      }
     };
 
     send.addEventListener('click', handleChat);
     input.addEventListener('keypress', (e) => { if(e.key === 'Enter') handleChat(); });
+  },
+
+  async buyNow(id, varName, varPrice, qty) {
+    if (!this.isLoggedIn()) { this.showToast('Please login first'); window.location.hash = '#/login'; return; }
+    try {
+      await API.addToCart(id, varName, varPrice, qty);
+      window.location.hash = '#/checkout';
+    } catch(err) { this.showToast('Failed to process Buy Now'); }
+  },
+
+  openRatingModal(id, name, currentRating) {
+    const existing = document.getElementById('rating-modal');
+    if (existing) existing.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'rating-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal-content" style="text-align:center; max-width:400px; animation: modalPop 0.4s var(--ease);">
+        <div style="font-size:3rem; margin-bottom:var(--sp-4);">⭐</div>
+        <h3 style="margin-bottom:var(--sp-2)">Rate this Product</h3>
+        <p style="color:var(--clr-text-light); margin-bottom:var(--sp-6);">${name}</p>
+        
+        <div class="star-rating-input" style="display:flex; justify-content:center; gap:var(--sp-2); margin-bottom:var(--sp-8); font-size:2.5rem;">
+          ${[1,2,3,4,5].map(v => `<span class="star-item" data-val="${v}" style="cursor:pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.3)'" onmouseout="this.style.transform=''">☆</span>`).join('')}
+        </div>
+        
+        <div style="display:flex; gap:var(--sp-3); justify-content:center;">
+          <button class="btn btn-secondary" onclick="document.getElementById('rating-modal').remove()">Cancel</button>
+          <button class="btn btn-primary" id="submit-rating" disabled>Give Rate →</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    
+    let selectedRating = 0;
+    const stars = modal.querySelectorAll('.star-item');
+    stars.forEach(star => {
+      star.addEventListener('click', () => {
+        selectedRating = parseInt(star.dataset.val);
+        stars.forEach((s, i) => s.innerHTML = (i < selectedRating) ? '⭐' : '☆');
+        document.getElementById('submit-rating').disabled = false;
+        
+        // Burst effect for selected star
+        star.style.animation = 'none';
+        void star.offsetWidth;
+        star.style.animation = 'badgePop 0.4s var(--ease)';
+      });
+    });
+
+    document.getElementById('submit-rating').addEventListener('click', async () => {
+      try {
+        const res = await API.rateProduct(id, selectedRating);
+        this.showToast(`Thank you! New rating: ⭐ ${res.rating}`);
+        const el = document.getElementById('rating-val-' + id);
+        if(el) el.textContent = res.rating;
+        modal.remove();
+      } catch (err) { this.showToast('Failed to submit rating'); }
+    });
+
+    modal.addEventListener('click', (e) => { if(e.target === modal) modal.remove(); });
   }
 };
 

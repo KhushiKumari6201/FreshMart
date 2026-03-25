@@ -20,10 +20,20 @@ class Store {
   }
 
   loadProducts() {
-    const dataPath = path.join(__dirname, '..', 'data', 'products.json');
-    const raw = fs.readFileSync(dataPath, 'utf-8');
+    this.productsPath = path.join(__dirname, '..', 'data', 'products.json');
+    const raw = fs.readFileSync(this.productsPath, 'utf-8');
     this.products = JSON.parse(raw);
     this.productIdCounter = Math.max(...this.products.map(p => p.id), 100) + 1;
+  }
+
+  saveProducts() {
+    try {
+      fs.writeFileSync(this.productsPath, JSON.stringify(this.products, null, 2));
+      return true;
+    } catch (e) {
+      console.error('Failed to save products:', e);
+      return false;
+    }
   }
 
   seedAdmin() {
@@ -88,7 +98,21 @@ class Store {
   }
 
   getProductById(id) {
-    return this.products.find(p => p.id === id && !p.deleted);
+    return this.products.find(p => p.id === parseInt(id) && !p.deleted);
+  }
+
+  rateProduct(productId, rating) {
+    const product = this.getProductById(productId);
+    if (!product) return { error: 'Product not found' };
+    if (!product.ratingsCount) {
+      product.ratingsCount = 10; // Base count for realism
+      product.ratingSum = (product.rating || 4.5) * 10;
+    }
+    product.ratingSum += parseFloat(rating);
+    product.ratingsCount += 1;
+    product.rating = parseFloat((product.ratingSum / product.ratingsCount).toFixed(1));
+    this.saveProducts(); // PERSIST TO FILE
+    return { id: product.id, rating: product.rating, ratingsCount: product.ratingsCount };
   }
 
   getCategories() {
@@ -314,9 +338,11 @@ class Store {
   }
 
   updateOrderStatus(orderId, status) {
-    const order = this.orders.find(o => o.id === orderId);
+    const order = this.orders.find(o => o.id === parseInt(orderId));
     if (!order) return { error: 'Order not found' };
     order.status = status;
+    if (!order.statusHistory) order.statusHistory = [];
+    order.statusHistory.push({ status, time: new Date().toISOString() });
     return order;
   }
 

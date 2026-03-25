@@ -59,6 +59,13 @@ const API = {
     return this.request('/products/' + id);
   },
 
+  rateProduct(id, rating) {
+    return this.request('/products/' + id + '/rate', {
+      method: 'POST',
+      body: JSON.stringify({ rating })
+    });
+  },
+
   // Admin product CRUD
   addProduct(data) {
     return this.request('/products', { method: 'POST', body: JSON.stringify(data) });

@@ -40,4 +40,13 @@ router.delete('/:id', (req, res) => {
   res.json(result);
 });
 
+// POST /api/products/:id/rate
+router.post('/:id/rate', (req, res) => {
+  const { rating } = req.body;
+  if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'rating (1-5) required' });
+  const result = store.rateProduct(req.params.id, rating);
+  if (result.error) return res.status(404).json(result);
+  res.json(result);
+});
+
 module.exports = router;

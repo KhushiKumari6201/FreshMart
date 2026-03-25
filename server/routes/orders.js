@@ -5,11 +5,11 @@ const store = require('../models/store');
 // POST /api/orders — place order
 router.post('/', (req, res) => {
   const username = req.headers['x-username'] || 'guest';
-  const { customerName, address, phone, paymentMethod, paymentDetails } = req.body;
+  const { customerName, address, phone, paymentMethod, paymentDetails, couponCode } = req.body;
   if (!customerName || !address || !phone) {
     return res.status(400).json({ error: 'customerName, address, and phone are required' });
   }
-  const result = store.placeOrder(username, customerName, address, phone, paymentMethod, paymentDetails);
+  const result = store.placeOrder(username, customerName, address, phone, paymentMethod, paymentDetails, couponCode);
   if (result.error) return res.status(400).json(result);
   res.status(201).json(result);
 });
