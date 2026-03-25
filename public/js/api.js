@@ -94,14 +94,28 @@ const API = {
   getCartCount() { return this.request('/cart/count'); },
 
   // Orders
-  placeOrder(customerName, address, phone, paymentMethod, paymentDetails) {
+  placeOrder(customerName, address, phone, paymentMethod, paymentDetails, couponCode = null) {
     return this.request('/orders', {
       method: 'POST',
-      body: JSON.stringify({ customerName, address, phone, paymentMethod, paymentDetails })
+      body: JSON.stringify({ customerName, address, phone, paymentMethod, paymentDetails, couponCode })
     });
   },
 
   getOrders() { return this.request('/orders'); },
+
+  // Wishlist
+  getWishlist() { return this.request('/wishlist'); },
+  toggleWishlist(productId) {
+    return this.request('/wishlist/toggle/' + productId, { method: 'POST' });
+  },
+
+  // Coupons
+  validateCoupon(code, amount) {
+    return this.request('/coupons/validate', {
+      method: 'POST',
+      body: JSON.stringify({ code, amount })
+    });
+  },
 
   // Admin
   getAllOrders() { return this.request('/orders/all'); },

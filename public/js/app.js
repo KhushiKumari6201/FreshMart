@@ -30,8 +30,12 @@ const App = {
       this.debounce((e) => this.handleSearch(e.target.value), 350)
     );
     
-    // Add ripple effect for all buttons
     document.body.addEventListener('click', (e) => {
+      // Close suggestions on outside click
+      if (!e.target.closest('#search-container')) {
+        const sugg = document.getElementById('search-suggestions');
+        if (sugg) sugg.style.display = 'none';
+      }
       const btn = e.target.closest('.btn');
       if (!btn) return;
       const rect = btn.getBoundingClientRect();
@@ -43,9 +47,23 @@ const App = {
       setTimeout(() => ripple.remove(), 600);
     });
 
+    this.initTheme();
     this.updateNav();
-    this.route();
     this.updateCartBadge();
+    this.initChatbot();
+    this.route();
+  },
+
+  initTheme() {
+    const toggle = document.getElementById('theme-toggle');
+    const savedTheme = localStorage.getItem('freshmart_theme') || 'light';
+    document.body.setAttribute('data-theme', savedTheme);
+    toggle?.addEventListener('click', () => {
+      const current = document.body.getAttribute('data-theme') || 'light';
+      const next = current === 'light' ? 'dark' : 'light';
+      document.body.setAttribute('data-theme', next);
+      localStorage.setItem('freshmart_theme', next);
+    });
   },
 
   updateNav() {
@@ -102,6 +120,7 @@ const App = {
     else if (hash === '#/payment') this.renderPayment(app);
     else if (hash.startsWith('#/confirmation/')) this.renderConfirmation(app, hash.split('/')[2]);
     else if (hash.startsWith('#/product/')) this.renderProductDetail(app, hash.split('/')[2]);
+    else if (hash === '#/wishlist') this.renderWishlist(app);
     else if (hash === '#/orders') this.renderOrders(app);
     else if (hash === '#/profile') this.renderProfile(app);
     else if (hash === '#/admin') this.renderAdminDashboard(app);
@@ -253,19 +272,22 @@ const App = {
     });
   },
 
-  // ── Home Page ──────────────────────────────────
   async renderHome(container, category = null, search = null) {
     container.innerHTML = `
-      <section class="hero skeleton" style="height:250px; border-radius:16px; margin-bottom:32px; padding:0;"></section>
+      <section class="hero skeleton" style="height:320px; border-radius:16px; margin-bottom:32px;"></section>
       <div class="product-grid">
-        ${Array(8).fill('<div class="product-card skeleton" style="height:350px; background:var(--clr-surface); border:1px solid var(--clr-border-light);"></div>').join('')}
+        ${Array(8).fill('<div class="product-card skeleton" style="height:400px; background:#fff; border-radius:16px;"></div>').join('')}
       </div>
     `;
     try {
-      const [products, categories] = await Promise.all([
-        API.getProducts(category, search), API.getCategories()
+      const [products, categories, wishlist] = await Promise.all([
+        API.getProducts(category, search),
+        API.getCategories(),
+        this.isLoggedIn() ? API.getWishlist() : Promise.resolve([])
       ]);
+      const wishIds = new Set(wishlist.map(p => p.id));
       const emojis = {'Fruits':'🍎','Vegetables':'🥬','Dairy':'🧀','Bakery':'🍞','Beverages':'☕','Snacks':'🍿','Meat & Seafood':'🥩','Pantry Staples':'🥫'};
+      
       container.innerHTML = `
         <section class="hero">
           <div class="rotating-badge">
@@ -285,7 +307,7 @@ const App = {
           </div>
           <h1 class="hero__title">Fresh Groceries,<br>Delivered Fast 🚀</h1>
           <p class="hero__subtitle">Shop from 50+ premium quality items. From farm-fresh fruits to artisan bakery — everything you need in one place.</p>
-          <a href="#/" class="hero__cta" onclick="document.querySelector('.categories').scrollIntoView({behavior:'smooth'})">Start Shopping →</a>
+          <a href="#/" class="hero__cta" onclick="document.querySelector('.categories')?.scrollIntoView({behavior:'smooth'})">Start Shopping →</a>
         </section>
         <div class="categories" id="category-filter">
           <button class="category-chip ${!category ? 'active' : ''}" data-category="">🏷️ All Items</button>
@@ -296,22 +318,23 @@ const App = {
             <span style="font-size:0.9rem;color:var(--clr-text-muted);font-weight:400">(${products.length} items)</span>
           </h2>
           ${products.length === 0 ? `<div class="empty-state"><div class="empty-state__icon">🔍</div><h3 class="empty-state__title">No products found</h3><a href="#/" class="btn btn-primary">View All</a></div>` :
-          `<div class="product-grid">${products.map((p, i) => this.renderProductCard(p, i)).join('')}</div>`}
+          `<div class="product-grid">${products.map((p, i) => this.renderProductCard(p, i, wishIds.has(p.id))).join('')}</div>`}
         </div>
       `;
+      // Chip click events
       container.querySelectorAll('.category-chip').forEach(chip => {
         chip.addEventListener('click', () => {
           this.renderHome(container, chip.dataset.category || null, null);
           document.getElementById('search-input').value = '';
         });
       });
+      // Add to cart events
       container.querySelectorAll('.add-to-cart-btn').forEach(btn => {
         btn.addEventListener('click', (e) => { 
           e.preventDefault(); 
           const id = parseInt(btn.dataset.id);
-          const qtyInput = document.getElementById('qty-' + id);
-          const qty = qtyInput ? parseInt(qtyInput.value) || 1 : 1;
-          this.addToCart(id, null, null, qty); 
+          const qty = parseInt(document.getElementById('qty-' + id)?.value) || 1;
+          this.addToCart(id, null, null, qty, btn); 
           this.flyToCartAnimation(btn);
         });
       });
@@ -345,23 +368,39 @@ const App = {
     }
   },
 
-  renderProductCard(p, i) {
+  renderProductCard(p, i, isWishlisted = false) {
+    const rating = (Math.random() * (5 - 3.8) + 3.8).toFixed(1);
+    const delTime = Math.floor(Math.random() * (45 - 20) + 20);
     return `
-      <div class="product-card stagger-${(i % 8) + 1}">
-        <a href="#/product/${p.id}" class="product-card__image" style="display:flex; text-decoration:none;">
-          <span class="product-card__category">${p.category}</span>
-          <img src="${p.image}" alt="${p.name}" loading="lazy">
-        </a>
-        <div class="product-card__body">
-          <a href="#/product/${p.id}" style="text-decoration:none; color:inherit;">
-            <h3 class="product-card__name" style="transition:var(--transition);">${p.name}</h3>
+      <div class="product-card stagger-${(i % 8) + 1} ${!p.inStock ? 'out-of-stock' : ''}">
+        <div class="product-card__image-wrap" style="position:relative;">
+          <a href="#/product/${p.id}" class="product-card__image" style="display:flex; text-decoration:none;">
+            <span class="product-card__category">${p.category}</span>
+            <img src="${p.image}" alt="${p.name}" loading="lazy" style="${!p.inStock ? 'filter:grayscale(1) opacity(0.5)' : ''}">
           </a>
-          <p class="product-card__desc">${p.description}</p>
+          <button class="product-card__wish ${isWishlisted ? 'active' : ''}" data-id="${p.id}" onclick="event.preventDefault(); event.stopPropagation(); App.toggleWishlist(${p.id}, this)">
+            ${isWishlisted ? '❤️' : '🤍'}
+          </button>
+          ${!p.inStock ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.7);color:#fff;padding:4px 12px;border-radius:var(--radius-sm);font-weight:700;z-index:6;pointer-events:none;">OUT OF STOCK</div>' : ''}
+        </div>
+        <div class="product-card__body">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+            <a href="#/product/${p.id}" style="text-decoration:none; color:inherit; flex:1;">
+              <h3 class="product-card__name">${p.name}</h3>
+            </a>
+            <div style="font-size:var(--fs-xs); background:var(--clr-primary-glow); color:var(--clr-primary-dark); padding:2px 6px; border-radius:4px; font-weight:700;">⭐ ${rating}</div>
+          </div>
+          <p class="product-card__desc">${p.description || 'Premium quality farm-fresh product.'}</p>
+          <div style="font-size:0.7rem; color:var(--clr-text-muted); margin-bottom:var(--sp-4); display:flex; align-items:center; gap:4px;">🕒 Delivery: ${delTime} mins</div>
           <div class="product-card__footer">
             <div><span class="product-card__price">₹${p.price.toFixed(2)}</span><span class="product-card__unit">/ ${p.unit}</span></div>
             <div style="display:flex; align-items:center; gap:var(--sp-2);">
-              <input type="number" id="qty-${p.id}" value="1" min="1" max="99" style="width:45px; height:28px; text-align:center; border:2px solid var(--clr-border); border-radius:var(--radius-sm); font-size:var(--fs-sm); outline:none;" onclick="event.preventDefault(); event.stopPropagation();" onfocus="this.style.borderColor='var(--clr-primary)'" onblur="this.style.borderColor='var(--clr-border)'">
-              <button class="btn btn-primary btn-sm add-to-cart-btn" data-id="${p.id}">+ Add</button>
+              ${p.inStock ? `
+                <input type="number" id="qty-${p.id}" value="1" min="1" max="99" style="width:45px; height:28px; text-align:center; border:2px solid var(--clr-border); border-radius:var(--radius-sm); font-size:var(--fs-sm); outline:none;" onclick="event.preventDefault(); event.stopPropagation();">
+                <button class="btn btn-primary btn-sm add-to-cart-btn" data-id="${p.id}">+ Add</button>
+              ` : `
+                <button class="btn btn-secondary btn-sm" disabled style="opacity:0.6;cursor:not-allowed;">📋 Remind Me</button>
+              `}
             </div>
           </div>
         </div>
@@ -370,7 +409,20 @@ const App = {
 
   // ── Product Detail Page ──────────────────────────
   async renderProductDetail(container, id) {
-    container.innerHTML = '<div class="spinner"></div>';
+    container.innerHTML = `
+      <div class="product-detail" style="padding:var(--sp-8) var(--sp-6)">
+        <div class="product-detail__grid">
+          <div class="product-detail__image skeleton" style="aspect-ratio:1/1;"></div>
+          <div class="product-detail__info">
+            <div class="skeleton" style="height:30px; width:150px; margin-bottom:20px;"></div>
+            <div class="skeleton" style="height:60px; width:100%; margin-bottom:20px;"></div>
+            <div class="skeleton" style="height:40px; width:200px; margin-bottom:40px;"></div>
+            <div class="skeleton" style="height:150px; width:100%; margin-bottom:40px;"></div>
+            <div class="skeleton" style="height:60px; width:100%;"></div>
+          </div>
+        </div>
+      </div>
+    `;
     try {
       const product = await API.getProduct(id);
       container.innerHTML = `
@@ -480,7 +532,7 @@ const App = {
                          <span style="font-weight:600; color:var(--clr-text-light);">Qty:</span>
                          <input type="number" id="detail-qty" value="1" min="1" max="20" style="width:60px; height:100%; text-align:center; border:none; background:transparent; font-size:var(--fs-lg); font-weight:800; outline:none; color:var(--clr-primary-dark);">
                        </div>
-                       <button class="btn btn-primary btn-lg" style="flex:1;" onclick="App.addToCart(${product.id}, document.getElementById('sel-var-name') ? document.getElementById('sel-var-name').value : null, document.getElementById('sel-var-price') ? document.getElementById('sel-var-price').value : null, parseInt(document.getElementById('detail-qty').value)||1)">🛒 Add to Cart</button>
+                       <button class="btn btn-primary btn-lg" style="flex:1;" onclick="App.addToCart(${product.id}, document.getElementById('sel-var-name') ? document.getElementById('sel-var-name').value : null, document.getElementById('sel-var-price') ? document.getElementById('sel-var-price').value : null, parseInt(document.getElementById('detail-qty').value)||1, this)">🛒 Add to Cart</button>
                      </div>`
                   : `<button class="btn btn-secondary btn-lg" style="width:100%;" disabled>Out of Stock</button>`}
               </div>
@@ -565,7 +617,17 @@ const App = {
   // ── Cart Page ──────────────────────────────────
   async renderCart(container) {
     if (!this.isLoggedIn()) { window.location.hash = '#/login'; return; }
-    container.innerHTML = '<div class="spinner"></div>';
+    container.innerHTML = `
+      <div class="cart-page">
+        <div class="skeleton" style="height:50px; width:300px; margin-bottom:40px;"></div>
+        <div class="cart-layout">
+          <div class="cart-items">
+            ${Array(3).fill('<div class="cart-item skeleton" style="height:120px; width:100%;"></div>').join('')}
+          </div>
+          <div class="cart-summary skeleton" style="height:400px; width:100%;"></div>
+        </div>
+      </div>
+    `;
     try {
       const cart = await API.getCart();
       if (cart.items.length === 0) {
@@ -608,17 +670,44 @@ const App = {
       container.querySelectorAll('.qty-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const id = btn.dataset.id;
+          const isInc = btn.dataset.action === 'increase';
           const item = cart.items.find(i=>String(i.id)===id || String(i.productId)===id);
           if(!item) return;
-          const nq = btn.dataset.action==='increase'?item.quantity+1:item.quantity-1;
-          if(nq<=0) await API.removeFromCart(id); else await API.updateCartItem(id,nq);
-          this.renderCart(container); this.updateCartBadge();
+          
+          const nq = isInc ? item.quantity + 1 : item.quantity - 1;
+          
+          // Show "dynamic" update by disabling buttons immediately
+          btn.parentElement.style.opacity = '0.5';
+          btn.parentElement.style.pointerEvents = 'none';
+          
+          try {
+            if(nq <= 0) {
+              if (confirm('Remove this item from cart?')) await API.removeFromCart(id);
+              else {
+                btn.parentElement.style.opacity = '1';
+                btn.parentElement.style.pointerEvents = 'auto';
+                return;
+              }
+            } else {
+              await API.updateCartItem(id, nq);
+            }
+            this.renderCart(container); 
+            this.updateCartBadge();
+          } catch(err) {
+            this.showToast('Update failed');
+            btn.parentElement.style.opacity = '1';
+            btn.parentElement.style.pointerEvents = 'auto';
+          }
         });
       });
       container.querySelectorAll('.remove-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          await API.removeFromCart(btn.dataset.id);
-          this.showToast('Item removed'); this.renderCart(container); this.updateCartBadge();
+          if (confirm('Are you sure you want to remove this item?')) {
+            await API.removeFromCart(btn.dataset.id);
+            this.showToast('Item removed'); 
+            this.renderCart(container); 
+            this.updateCartBadge();
+          }
         });
       });
     } catch (err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
@@ -632,6 +721,9 @@ const App = {
       const cart = await API.getCart();
       if (cart.items.length === 0) { window.location.hash = '#/cart'; return; }
       const user = this.getUser();
+      let discount = 0;
+      let couponCode = '';
+
       container.innerHTML = `
         <div class="checkout-page">
           <h1 class="section-title">📋 Checkout</h1>
@@ -641,18 +733,46 @@ const App = {
               <div class="form-group"><label>Full Name *</label><input type="text" id="customer-name" placeholder="Your name" value="${user.name||''}" required><span class="error-msg">Required</span></div>
               <div class="form-group"><label>Phone Number *</label><input type="tel" id="customer-phone" placeholder="+91 98765 43210" required><span class="error-msg">Required</span></div>
               <div class="form-group"><label>Delivery Address *</label><textarea id="customer-address" placeholder="Full delivery address" required></textarea><span class="error-msg">Required</span></div>
-              <button type="submit" class="btn btn-primary btn-lg" style="width:100%">Continue to Payment →</button>
+              
+              <div class="coupon-section" style="margin-top:var(--sp-8); background:var(--clr-bg-card); padding:var(--sp-4); border-radius:var(--radius-md); border:1px solid var(--clr-border);">
+                <h4 style="margin-bottom:var(--sp-3)">Apply Coupon</h4>
+                <div style="display:flex; gap:var(--sp-2)">
+                  <input type="text" id="coupon-input" placeholder="SAVE10, FRESH20..." style="flex:1; padding:var(--sp-2); border:1px solid var(--clr-border); border-radius:var(--radius-sm); font-family:monospace; font-weight:700; text-transform:uppercase;">
+                  <button type="button" class="btn btn-secondary" id="apply-coupon">Apply</button>
+                </div>
+                <p id="coupon-msg" style="font-size:var(--fs-xs); margin-top:var(--sp-1); height:1em;"></p>
+                <div style="margin-top:var(--sp-2); font-size:var(--fs-xs); color:var(--clr-text-muted)">Try <strong>SAVE10</strong> for 10% off orders above ₹500</div>
+              </div>
+
+              <button type="submit" class="btn btn-primary btn-lg" style="width:100%; margin-top:var(--sp-6)">Continue to Payment →</button>
             </form>
-            <div class="cart-summary">
-              <h3 class="cart-summary__title">Your Items</h3>
-              ${cart.items.map(item=>`<div class="cart-summary__row"><span>${item.product.name} × ${item.quantity}</span><span>₹${item.subtotal.toFixed(2)}</span></div>`).join('')}
-              <div class="cart-summary__row"><span>Delivery</span><span style="color:var(--clr-primary)">FREE</span></div>
-              <div class="cart-summary__row"><span>Tax</span><span>₹${(cart.total*0.08).toFixed(2)}</span></div>
-              <div class="cart-summary__total"><span>Total</span><span>₹${(cart.total*1.08).toFixed(2)}</span></div>
+            <div class="cart-summary" id="checkout-summary">
+              ${this._getSummaryHTML(cart, 0)}
             </div>
           </div>
         </div>
       `;
+
+      document.getElementById('apply-coupon').addEventListener('click', async () => {
+        const code = document.getElementById('coupon-input').value.trim();
+        const msg = document.getElementById('coupon-msg');
+        if(!code) return;
+        try {
+          const res = await API.validateCoupon(code, cart.total);
+          discount = res.discount;
+          couponCode = code;
+          msg.textContent = `✅ Applied! You saved ₹${discount.toFixed(2)}`;
+          msg.style.color = 'var(--clr-primary)';
+          document.getElementById('checkout-summary').innerHTML = this._getSummaryHTML(cart, discount);
+        } catch(err) {
+          msg.textContent = '❌ ' + err.message;
+          msg.style.color = 'var(--clr-danger)';
+          discount = 0;
+          couponCode = '';
+          document.getElementById('checkout-summary').innerHTML = this._getSummaryHTML(cart, 0);
+        }
+      });
+
       document.getElementById('checkout-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const name = document.getElementById('customer-name').value.trim();
@@ -664,10 +784,25 @@ const App = {
           if(!val){g.classList.add('error');valid=false;}else g.classList.remove('error');
         });
         if (!valid) return;
-        this.checkoutData = { customerName: name, phone, address, cartTotal: cart.total };
+        this.checkoutData = { customerName: name, phone, address, cartTotal: cart.total, couponCode, discount };
         window.location.hash = '#/payment';
       });
     } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  _getSummaryHTML(cart, discount) {
+    const subtotal = cart.total;
+    const tax = (subtotal - discount) * 0.08;
+    const finalTotal = subtotal - discount + tax;
+    return `
+      <h3 class="cart-summary__title">Order Summary</h3>
+      ${cart.items.map(item=>`<div class="cart-summary__row"><span>${item.product.name} × ${item.quantity}</span><span>₹${item.subtotal.toFixed(2)}</span></div>`).join('')}
+      <div class="cart-summary__row" style="margin-top:var(--sp-4)"><span>Subtotal</span><span>₹${subtotal.toFixed(2)}</span></div>
+      ${discount > 0 ? `<div class="cart-summary__row" style="color:var(--clr-primary); font-weight:700;"><span>Coupon Discount</span><span>-₹${discount.toFixed(2)}</span></div>` : ''}
+      <div class="cart-summary__row"><span>Delivery</span><span style="color:var(--clr-primary)">FREE</span></div>
+      <div class="cart-summary__row"><span>Tax (8%)</span><span>₹${tax.toFixed(2)}</span></div>
+      <div class="cart-summary__total"><span>Total Payable</span><span>₹${finalTotal.toFixed(2)}</span></div>
+    `;
   },
 
   // ── Payment Page ──────────────────────────────
@@ -765,13 +900,16 @@ const App = {
       : [['Connecting to payment gateway...','Verifying details',1200],['Processing payment...','Please wait',1500],['Verifying transaction...','Almost done',1000]];
     for (const [t,tx,ms] of steps) { title.textContent = t; text.textContent = tx; await new Promise(r=>setTimeout(r,ms)); }
     try {
+      const { customerName, address, phone, couponCode } = this.checkoutData;
       let details = {};
       if(method==='upi') details={upiId:document.getElementById('upi-id')?.value||''};
       else if(method==='card') details={last4:(document.getElementById('card-number')?.value||'').slice(-4)};
       else if(method==='netbanking') details={bank:document.querySelector('input[name=bank]:checked')?.value||''};
-      const order = await API.placeOrder(this.checkoutData.customerName, this.checkoutData.address, this.checkoutData.phone, method, details);
+      
+      const order = await API.placeOrder(customerName, address, phone, method, details, couponCode);
+      
       title.textContent = '✅ Payment Successful!';
-      text.textContent = '';
+      text.textContent = `Order #${order.id} placed successfully`;
       await new Promise(r=>setTimeout(r,800));
       overlay.style.display = 'none';
       this.checkoutData = null;
@@ -789,30 +927,123 @@ const App = {
     try {
       const orders = await API.getOrders();
       const order = orders.find(o => o.id === parseInt(orderId));
-      if (!order) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">🤷</div><h3>Order not found</h3><a href="#/" class="btn btn-primary">Go Home</a></div>`; return; }
-      const pm = {upi:'UPI',card:'Credit/Debit Card',netbanking:'Net Banking',cod:'Cash on Delivery'};
+      if (!order) { container.innerHTML = `<div class="empty-state"><h3>Order not found</h3></div>`; return; }
+
+      const statuses = [
+        { id: 'ordered', label: 'Ordered', icon: '📝' },
+        { id: 'packed', label: 'Packed', icon: '📦' },
+        { id: 'out-for-delivery', label: 'Out for Delivery', icon: '🚚' },
+        { id: 'delivered', label: 'Delivered', icon: '🏠' }
+      ];
+
+      const currentIdx = statuses.findIndex(s => s.id === order.status);
+      const progress = (currentIdx / (statuses.length - 1)) * 100;
+      const pm = {upi:'UPI',card:'Card',netbanking:'Net Banking',cod:'COD'};
+
       container.innerHTML = `
-        <div class="confirmation-page">
-          <div class="confirmation__icon">✅</div>
-          <h1 class="confirmation__title">Order Placed!</h1>
-          <p class="confirmation__subtitle">Your groceries are on their way. Estimated delivery: 30-45 min.</p>
-          <div class="confirmation__details">
-            <div class="confirmation__detail-row"><span>Order ID</span><span>#${order.id}</span></div>
-            <div class="confirmation__detail-row"><span>Customer</span><span>${order.customerName}</span></div>
-            <div class="confirmation__detail-row"><span>Phone</span><span>${order.phone}</span></div>
-            <div class="confirmation__detail-row"><span>Address</span><span>${order.address}</span></div>
-            <div class="confirmation__detail-row"><span>Payment</span><span style="color:var(--clr-primary);font-weight:600">${pm[order.paymentMethod]||order.paymentMethod}</span></div>
-            <div class="confirmation__detail-row"><span>Status</span><span style="color:var(--clr-primary);font-weight:600">✓ ${order.status.charAt(0).toUpperCase()+order.status.slice(1)}</span></div>
-            <div class="confirmation__items"><h4 style="margin-bottom:var(--sp-3)">Items Ordered</h4>${order.items.map(i=>`<div class="confirmation__item"><span>${i.name} × ${i.quantity}</span><span>₹${i.subtotal.toFixed(2)}</span></div>`).join('')}</div>
-            <div class="confirmation__detail-row" style="margin-top:var(--sp-4)"><span>Total Paid</span><span>₹${(order.total*1.08).toFixed(2)}</span></div>
+        <div class="confirmation-page" style="animation: fadeInUp 0.6s var(--ease); max-width:800px; margin:0 auto; padding:var(--sp-8) var(--sp-4);">
+          <div style="text-align:center; margin-bottom:var(--sp-8);">
+            <div class="confirmation__icon" style="background:var(--clr-primary); color:#fff; width:80px; height:80px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:2.5rem; margin:0 auto var(--sp-4); box-shadow:var(--shadow-glow);">✓</div>
+            <h1 class="confirmation__title" style="font-size:var(--fs-3xl); margin-bottom:var(--sp-2);">Order Confirmed!</h1>
+            <p style="color:var(--clr-text-light);">We've received your order #${order.id}.</p>
           </div>
-          <div style="display:flex;gap:var(--sp-4);justify-content:center;flex-wrap:wrap">
-            <a href="#/" class="btn btn-primary btn-lg">Continue Shopping</a>
+
+          <!-- Tracking Stepper -->
+          <div style="background:var(--clr-surface); padding:var(--sp-8) var(--sp-4); border-radius:var(--radius-lg); border:1px solid var(--clr-border); margin-bottom:var(--sp-8);">
+            <h3 style="text-align:center; margin-bottom:var(--sp-8); font-size:var(--fs-lg);">Track Order</h3>
+            <div class="tracking-stepper">
+              <div class="tracking-st-line"></div>
+              <div class="tracking-st-progress" style="width:${progress}%"></div>
+              ${statuses.map((s, i) => {
+                const isCompleted = i < currentIdx;
+                const isActive = i === currentIdx;
+                const history = order.statusHistory?.find(h => h.status === s.id);
+                return `
+                  <div class="tracking-step ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''}">
+                    <div class="tracking-step__icon">${isCompleted ? '✓' : s.icon}</div>
+                    <div class="tracking-step__label">${s.label}</div>
+                    ${history ? `<div class="tracking-step__time">${new Date(history.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:var(--sp-6);">
+            <div style="background:var(--clr-bg-card); padding:var(--sp-6); border-radius:var(--radius-lg); border:1px solid var(--clr-border);">
+              <h3 style="margin-bottom:var(--sp-4); font-size:var(--fs-lg); border-bottom:1px solid var(--clr-border); padding-bottom:var(--sp-2);">Delivery Address</h3>
+              <p style="font-weight:700; color:var(--clr-text-dark); margin-bottom:4px;">${order.customerName}</p>
+              <p style="color:var(--clr-text-light); font-size:0.95rem; line-height:1.6;">${order.address}</p>
+              <p style="margin-top:var(--sp-3); font-size:0.95rem;">📞 ${order.phone}</p>
+            </div>
+            
+            <div style="background:var(--clr-bg-card); padding:var(--sp-6); border-radius:var(--radius-lg); border:1px solid var(--clr-border);">
+              <h3 style="margin-bottom:var(--sp-4); font-size:var(--fs-lg); border-bottom:1px solid var(--clr-border); padding-bottom:var(--sp-2);">Order Summary</h3>
+              ${order.items.map(item => `
+                <div style="display:flex; justify-content:space-between; margin-bottom:var(--sp-2); font-size:0.95rem;">
+                  <span>${item.name} × ${item.quantity}</span>
+                  <span>₹${item.subtotal.toFixed(2)}</span>
+                </div>
+              `).join('')}
+              <div style="display:flex; justify-content:space-between; margin-top:var(--sp-4); padding-top:var(--sp-4); border-top:1px dashed var(--clr-border); font-weight:800; font-size:var(--fs-xl); color:var(--clr-primary-dark);">
+                <span>Total Paid</span>
+                <span>₹${(order.total * 1.08).toFixed(2)}</span>
+              </div>
+              <p style="font-size:0.75rem; color:var(--clr-text-muted); text-align:right; margin-top:4px;">via ${pm[order.paymentMethod]||order.paymentMethod}</p>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:var(--sp-4); justify-content:center; margin-top:var(--sp-10);">
+            <a href="#/" class="btn btn-primary btn-lg">Back to Shopping</a>
             <a href="#/orders" class="btn btn-secondary btn-lg">View All Orders</a>
           </div>
         </div>
       `;
+    } catch(err) { container.innerHTML = `<div class="empty-state"><h3>${err.message}</h3></div>`; }
+  },
+
+  async renderWishlist(container) {
+    if (!this.isLoggedIn()) { window.location.hash = '#/login'; return; }
+    container.innerHTML = '<div class="spinner"></div>';
+    try {
+      const products = await API.getWishlist();
+      container.innerHTML = `
+        <div class="wishlist-page" style="animation: fadeInUp 0.5s var(--ease)">
+          <h1 class="section-title">❤️ My Wishlist</h1>
+          ${products.length === 0 ? `
+            <div class="empty-state">
+              <div class="empty-state__icon">🤍</div>
+              <h3>Your wishlist is empty</h3>
+              <p>Save items you like for later!</p>
+              <a href="#/" class="btn btn-primary" style="margin-top:var(--sp-4)">Browse Products</a>
+            </div>
+          ` : `
+            <div class="product-grid">
+              ${products.map((p, i) => this.renderProductCard(p, i, true)).join('')}
+            </div>
+          `}
+        </div>
+      `;
+      container.querySelectorAll('.add-to-cart-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => { 
+          e.preventDefault(); 
+          const id = parseInt(btn.dataset.id);
+          const qty = parseInt(document.getElementById('qty-'+id)?.value) || 1;
+          this.addToCart(id, null, null, qty, btn); 
+          this.flyToCartAnimation(btn);
+        });
+      });
     } catch(err) { container.innerHTML = `<div class="empty-state"><div class="empty-state__icon">⚠️</div><h3>${err.message}</h3></div>`; }
+  },
+
+  async toggleWishlist(id, btn) {
+    if (!this.isLoggedIn()) { this.showToast('Please login first'); window.location.hash='#/login'; return; }
+    try {
+      const res = await API.toggleWishlist(id);
+      btn.classList.toggle('active', res.added);
+      btn.innerHTML = res.added ? '❤️' : '🤍';
+      this.showToast(res.added ? 'Added to Wishlist' : 'Removed from Wishlist');
+    } catch(err) { this.showToast('Failed to update wishlist'); }
   },
 
   // ── Orders ──────────────────────────────────────
@@ -1089,8 +1320,15 @@ const App = {
     setTimeout(() => flyingImg.remove(), 800);
   },
 
-  async addToCart(productId, variationName = null, variationPrice = null, quantity = 1) {
+  async addToCart(productId, variationName = null, variationPrice = null, quantity = 1, btn = null) {
     if (!this.isLoggedIn()) { this.showToast('Please login first'); window.location.hash='#/login'; return; }
+    
+    // Smooth pop animation on button
+    if (btn) {
+      btn.classList.add('animate-pop');
+      setTimeout(() => btn.classList.remove('animate-pop'), 400);
+    }
+
     try { 
       await API.addToCart(productId, variationName, variationPrice, quantity); 
       this.showToast(`Added ${quantity}x ${variationName ? variationName : 'item'} to cart! 🛒`); 
@@ -1112,12 +1350,122 @@ const App = {
     const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
     clearTimeout(this._tt); this._tt = setTimeout(()=>t.classList.remove('show'),2500);
   },
-  handleSearch(q) {
-    const t=q.trim();
-    if(t.length>0){window.location.hash='#/';this.renderHome(document.getElementById('app'),null,t);}
-    else if(window.location.hash==='#/'||window.location.hash==='')this.renderHome(document.getElementById('app'));
+  async handleSearch(q) {
+    const suggEl = document.getElementById('search-suggestions');
+    const t = q.trim();
+    
+    if (t.length < 2) {
+      suggEl.style.display = 'none';
+      if (t.length === 0 && (window.location.hash === '#/' || window.location.hash === '')) {
+        this.renderHome(document.getElementById('app'));
+      }
+      return;
+    }
+
+    try {
+      const products = await API.getProducts(null, t);
+      if (products.length > 0) {
+        this.renderSearchSuggestions(products.slice(0, 6), t);
+      } else {
+        suggEl.style.display = 'none';
+      }
+    } catch (e) {
+      suggEl.style.display = 'none';
+    }
   },
-  debounce(fn,d){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),d);};}
+
+  renderSearchSuggestions(products, query) {
+    const suggEl = document.getElementById('search-suggestions');
+    const highlight = (text) => {
+      const regex = new RegExp(`(${query})`, 'gi');
+      return text.replace(regex, '<span class="search-match">$1</span>');
+    };
+
+    suggEl.innerHTML = products.map(p => `
+      <div class="search-suggestion-item" onclick="window.location.hash='#/product/${p.id}'; document.getElementById('search-suggestions').style.display='none'; document.getElementById('search-input').value=''">
+        <img src="${p.image}" class="search-suggestion-img" alt="${p.name}">
+        <div class="search-suggestion-info">
+          <span class="search-suggestion-name">${highlight(p.name)}</span>
+          <span class="search-suggestion-category">${p.category}</span>
+        </div>
+      </div>
+    `).join('');
+    
+    suggEl.style.display = 'block';
+  },
+
+  debounce(fn,d){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),d);};},
+
+  initChatbot() {
+    if (document.querySelector('.chatbot-container')) return;
+    const chatContainer = document.createElement('div');
+    chatContainer.className = 'chatbot-container';
+    chatContainer.innerHTML = `
+      <button class="chatbot-btn" id="chatbot-toggle" title="FreshBot Support">🤖</button>
+      <div class="chatbot-window" id="chatbot-window">
+        <div class="chatbot-header">
+          <div style="font-size:1.8rem">🤖</div>
+          <div><h4>FreshBot</h4><p>Always active • Online</p></div>
+        </div>
+        <div class="chatbot-messages" id="chatbot-messages">
+          <div class="chat-msg bot">Hi there! I'm FreshBot. How can I help you shop today? 🥦. Try asking "What should I buy for breakfast?"</div>
+        </div>
+        <div class="chatbot-input">
+          <input type="text" id="chatbot-input" placeholder="Ask me anything...">
+          <button class="chatbot-send" id="chatbot-send">✈️</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(chatContainer);
+
+    const toggle = document.getElementById('chatbot-toggle');
+    const win = document.getElementById('chatbot-window');
+    const input = document.getElementById('chatbot-input');
+    const send = document.getElementById('chatbot-send');
+    const msgs = document.getElementById('chatbot-messages');
+
+    toggle.addEventListener('click', () => {
+      const isOpen = win.style.display === 'flex';
+      win.style.display = isOpen ? 'none' : 'flex';
+      toggle.classList.toggle('active', !isOpen);
+      if(!isOpen) input.focus();
+    });
+
+    const addMsg = (text, isBot = true) => {
+      const msg = document.createElement('div');
+      msg.className = `chat-msg ${isBot ? 'bot' : 'user'}`;
+      msg.textContent = text;
+      msgs.appendChild(msg);
+      msgs.scrollTop = msgs.scrollHeight;
+    };
+
+    const handleChat = async () => {
+      const q = input.value.trim();
+      if(!q) return;
+      addMsg(q, false);
+      input.value = '';
+
+      setTimeout(() => {
+        let reply = "I'm sorry, I'm still learning. Try asking about 'breakfast' or 'deals'!";
+        const lq = q.toLowerCase();
+        if(lq.includes('breakfast')){
+          reply = "For a healthy breakfast, I recommend our 'Organic Avocados' (₹120) and 'Greek Yogurt' (₹85) with some 'Artisan Sourdough bread' (₹95)! 🥑🥣";
+        } else if(lq.includes('deals') || lq.includes('offer') || lq.includes('discount') || lq.includes('coupon')){
+          reply = "Use code 'SAVE10' for 10% off! Also, checkout our 'Weekly Specials' on the home page! 🍌";
+        } else if(lq.includes('hello') || lq.includes('hi')){
+          reply = "Hello! Looking for something fresh today? I can suggest recipes or tell you our latest deals! 👋";
+        } else if(lq.includes('order') || lq.includes('status') || lq.includes('track')){
+          reply = "You can track your order in the 'Orders' section! If it says 'Ordered', we're currently packing it! 📦";
+        } else if(lq.includes('delivery')){
+          reply = "We usually deliver within 30-45 minutes. Our riders are super fast! 🚚💨";
+        }
+        addMsg(reply, true);
+      }, 800);
+    };
+
+    send.addEventListener('click', handleChat);
+    input.addEventListener('keypress', (e) => { if(e.key === 'Enter') handleChat(); });
+  }
 };
 
 document.addEventListener('DOMContentLoaded', () => App.init());

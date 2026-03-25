@@ -5,8 +5,14 @@ class Store {
   constructor() {
     this.products = [];
     this.carts = {};       // keyed by username
+    this.wishlists = {};   // keyed by username
     this.orders = [];
     this.users = [];
+    this.coupons = [
+      { code: 'SAVE10', discount: 0.10, minAmount: 500 },
+      { code: 'FRESH20', discount: 0.20, minAmount: 1000 },
+      { code: 'WELCOME50', discount: 0.50, minAmount: 2000 }
+    ];
     this.orderIdCounter = 1000;
     this.productIdCounter = 100;
     this.loadProducts();
@@ -212,34 +218,81 @@ class Store {
     return this.getCart(username);
   }
 
+  // ── Wishlist (per-user) ────────────────────────
+  _getUserWishlist(username) {
+    if (!this.wishlists[username]) this.wishlists[username] = [];
+    return this.wishlists[username];
+  }
+
+  getWishlist(username) {
+    const list = this._getUserWishlist(username);
+    return list.map(id => this.getProductById(id)).filter(p => !!p);
+  }
+
+  toggleWishlist(username, productId) {
+    const list = this._getUserWishlist(username);
+    const idx = list.indexOf(productId);
+    if (idx === -1) {
+      list.push(productId);
+      return { added: true };
+    } else {
+      list.splice(idx, 1);
+      return { added: false };
+    }
+  }
+
+  // ── Coupons ────────────────────────────────────
+  validateCoupon(code, amount) {
+    const coupon = this.coupons.find(c => c.code.toUpperCase() === code.toUpperCase());
+    if (!coupon) return { error: 'Invalid coupon code' };
+    if (amount < coupon.minAmount) return { error: `Minimum order amount for this coupon is ₹${coupon.minAmount}` };
+    return { success: true, discount: +(amount * coupon.discount).toFixed(2), finalAmount: +(amount * (1 - coupon.discount)).toFixed(2) };
+  }
+
   // ── Orders ────────────────────────────────────
-  placeOrder(username, customerName, address, phone, paymentMethod, paymentDetails) {
+  placeOrder(username, customerName, address, phone, paymentMethod, paymentDetails, couponCode = null) {
     const cart = this._getUserCart(username);
     if (cart.items.length === 0) return { error: 'Cart is empty' };
+
+    const originalTotal = this.getCartTotal(username);
+    let discount = 0;
+    let finalTotal = originalTotal;
+
+    if (couponCode) {
+      const v = this.validateCoupon(couponCode, originalTotal);
+      if (v.error) return v;
+      discount = v.discount;
+      finalTotal = v.finalAmount;
+    }
 
     const order = {
       id: ++this.orderIdCounter,
       username,
       items: cart.items.map(item => {
         const product = this.getProductById(item.productId);
-        const price = item.variationPrice !== undefined ? item.variationPrice : product.price;
+        const price = item.variationPrice !== undefined ? item.variationPrice : (product ? product.price : 0);
         const nameSuffix = item.variationName && item.variationName !== 'Standard' ? ` (${item.variationName})` : '';
         return {
           productId: item.productId,
-          name: product.name + nameSuffix,
-          image: product.image,
+          name: (product ? product.name : 'Unknown Product') + nameSuffix,
+          image: product ? product.image : '',
           price: price,
           quantity: item.quantity,
           subtotal: +(price * item.quantity).toFixed(2)
         };
       }),
-      total: this.getCartTotal(username),
+      total: finalTotal,
+      discount: discount,
+      couponCode: couponCode,
       customerName,
       address,
       phone,
       paymentMethod: paymentMethod || 'cod',
       paymentDetails: paymentDetails || {},
-      status: 'confirmed',
+      status: 'ordered',
+      statusHistory: [
+        { status: 'ordered', time: new Date().toISOString() }
+      ],
       paymentStatus: paymentMethod === 'cod' ? 'pending' : 'paid',
       createdAt: new Date().toISOString()
     };
