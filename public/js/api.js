@@ -132,5 +132,14 @@ const API = {
       method: 'PUT',
       body: JSON.stringify({ status })
     });
+  },
+
+  // Chat
+  getChatHistory() { return this.request('/chat/history'); },
+  sendChatMessage(message) {
+    return this.request('/chat/message', {
+      method: 'POST',
+      body: JSON.stringify({ message })
+    });
   }
 };

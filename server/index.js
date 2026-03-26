@@ -17,6 +17,7 @@ app.use('/api/cart', require('./routes/cart'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/wishlist', require('./routes/wishlist'));
 app.use('/api/coupons', require('./routes/coupons'));
+app.use('/api/chat', require('./routes/chat'));
 
 // SPA fallback
 app.get('*', (req, res) => {

@@ -1,0 +1,78 @@
+{
+  "users": [
+    {
+      "username": "admin",
+      "password": "admin123",
+      "name": "Administrator",
+      "role": "admin",
+      "createdAt": "2026-03-26T03:54:26.373Z"
+    },
+    {
+      "username": "admin",
+      "password": "admin123",
+      "name": "Administrator",
+      "role": "admin",
+      "createdAt": "2026-03-26T10:10:58.296Z"
+    },
+    {
+      "username": "khushi",
+      "password": "123456",
+      "name": "Khushi",
+      "role": "user",
+      "createdAt": "2026-03-26T10:14:43.639Z"
+    }
+  ],
+  "orders": [
+    {
+      "id": 1002,
+      "username": "khushi",
+      "items": [
+        {
+          "productId": 1,
+          "name": "Red Apple",
+          "image": "https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=400&h=300&fit=crop&auto=format",
+          "price": 1.99,
+          "quantity": 2,
+          "subtotal": 3.98
+        },
+        {
+          "productId": 2,
+          "name": "Banana Bunch",
+          "image": "https://images.unsplash.com/photo-1603833665858-e61d17a86224?w=400&h=300&fit=crop&auto=format",
+          "price": 0.69,
+          "quantity": 1,
+          "subtotal": 0.69
+        }
+      ],
+      "total": 4.67,
+      "discount": 0,
+      "couponCode": "",
+      "customerName": "Khushi",
+      "address": "gunupur,odisha",
+      "phone": "+919263791992",
+      "paymentMethod": "cod",
+      "paymentDetails": {},
+      "status": "ordered",
+      "statusHistory": [
+        {
+          "status": "ordered",
+          "time": "2026-03-26T10:15:52.947Z"
+        }
+      ],
+      "paymentStatus": "pending",
+      "createdAt": "2026-03-26T10:15:52.947Z"
+    }
+  ],
+  "wishlists": {
+    "khushi": [
+      2,
+      1
+    ]
+  },
+  "chats": {},
+  "carts": {
+    "khushi": {
+      "items": []
+    }
+  }
+}

@@ -5,34 +5,59 @@ class Store {
   constructor() {
     this.products = [];
     this.carts = {};       // keyed by username
-    this.wishlists = {};   // keyed by username
+    this.wishlists = {}; // username: [productIds]
     this.orders = [];
     this.users = [];
     this.coupons = [
-      { code: 'SAVE10', discount: 0.10, minAmount: 500 },
-      { code: 'FRESH20', discount: 0.20, minAmount: 1000 },
-      { code: 'WELCOME50', discount: 0.50, minAmount: 2000 }
+      { code: 'SAVE10', discount: 10, minAmount: 500, type: 'percent' },
+      { code: 'FRESH20', discount: 20, minAmount: 800, type: 'percent' },
+      { code: 'WELCOME50', discount: 50, minAmount: 0, type: 'flat' }
     ];
+    this.chats = {}; // username: [messages]
     this.orderIdCounter = 1000;
     this.productIdCounter = 100;
-    this.loadProducts();
+    this.loadData(); // This will load all data including products, chats, etc.
     this.seedAdmin();
   }
 
-  loadProducts() {
+  loadData() {
+    this.dbPath = path.join(__dirname, '..', 'data', 'db.json');
     this.productsPath = path.join(__dirname, '..', 'data', 'products.json');
-    const raw = fs.readFileSync(this.productsPath, 'utf-8');
-    this.products = JSON.parse(raw);
-    this.productIdCounter = Math.max(...this.products.map(p => p.id), 100) + 1;
+    
+    // Load Products
+    try {
+      if (fs.existsSync(this.productsPath)) {
+        this.products = JSON.parse(fs.readFileSync(this.productsPath, 'utf8'));
+        this.productIdCounter = Math.max(...this.products.map(p => p.id), 100) + 1;
+      }
+    } catch (e) { console.error('Products load failed'); }
+
+    // Load DB
+    try {
+      if (fs.existsSync(this.dbPath)) {
+        const db = JSON.parse(fs.readFileSync(this.dbPath, 'utf8'));
+        this.users = db.users || [];
+        this.orders = db.orders || [];
+        this.wishlists = db.wishlists || {};
+        this.chats = db.chats || {};
+        this.carts = db.carts || {};
+        this.orderIdCounter = Math.max(...this.orders.map(o => o.id), 1000) + 1;
+      }
+    } catch (e) { console.error('DB load failed'); }
   }
 
-  saveProducts() {
+  saveData() {
     try {
-      fs.writeFileSync(this.productsPath, JSON.stringify(this.products, null, 2));
-      return true;
+      const db = {
+        users: this.users,
+        orders: this.orders,
+        wishlists: this.wishlists,
+        chats: this.chats,
+        carts: this.carts
+      };
+      fs.writeFileSync(this.dbPath, JSON.stringify(db, null, 2));
     } catch (e) {
-      console.error('Failed to save products:', e);
-      return false;
+      console.error('Failed to save data:', e);
     }
   }
 
@@ -46,6 +71,22 @@ class Store {
     });
   }
 
+  // ── Chat AI & Storage ───────────────────────────
+  getChatHistory(username) {
+    if (!username) return [];
+    return this.chats[username] || [];
+  }
+
+  saveChatMessage(username, text, role) {
+    if (!username) return;
+    if (!this.chats[username]) this.chats[username] = [];
+    this.chats[username].push({ text, role, time: new Date() });
+    // Keep only last 50 messages
+    if (this.chats[username].length > 50) this.chats[username].shift();
+    this.saveData();
+  }
+
+  // ── Database ─────────────────────────────────────
   // ── Auth ──────────────────────────────────────
   register(username, password, name) {
     if (!username || !password || !name) return { error: 'All fields are required' };
@@ -111,7 +152,7 @@ class Store {
     product.ratingSum += parseFloat(rating);
     product.ratingsCount += 1;
     product.rating = parseFloat((product.ratingSum / product.ratingsCount).toFixed(1));
-    this.saveProducts(); // PERSIST TO FILE
+    this.saveData(); // PERSIST TO FILE
     return { id: product.id, rating: product.rating, ratingsCount: product.ratingsCount };
   }
 
@@ -218,6 +259,7 @@ class Store {
         variationPrice: priceToUse 
       });
     }
+    this.saveData();
     return this.getCart(username);
   }
 
@@ -231,6 +273,7 @@ class Store {
     } else {
       cart.items[idx].quantity = quantity;
     }
+    this.saveData();
     return this.getCart(username);
   }
 
@@ -239,6 +282,7 @@ class Store {
     const idx = cart.items.findIndex(i => i.id === cartItemId || i.productId === cartItemId);
     if (idx === -1) return { error: 'Item not in cart' };
     cart.items.splice(idx, 1);
+    this.saveData();
     return this.getCart(username);
   }
 
@@ -258,10 +302,9 @@ class Store {
     const idx = list.indexOf(productId);
     if (idx === -1) {
       list.push(productId);
-      return { added: true };
-    } else {
-      list.splice(idx, 1);
-      return { added: false };
+      const res = idx === -1 ? { added: true } : { added: false };
+      this.saveData();
+      return res;
     }
   }
 
@@ -323,6 +366,7 @@ class Store {
 
     this.orders.push(order);
     this.carts[username] = { items: [] };
+    this.saveData();
     return order;
   }
 

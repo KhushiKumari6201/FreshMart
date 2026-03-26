@@ -1462,17 +1462,17 @@ const App = {
     const chatContainer = document.createElement('div');
     chatContainer.className = 'chatbot-container';
     chatContainer.innerHTML = `
-      <button class="chatbot-btn" id="chatbot-toggle" title="FreshBot Support">🤖</button>
+      <button class="chatbot-btn" id="chatbot-toggle" title="FreshBot AI Support">🤖</button>
       <div class="chatbot-window" id="chatbot-window">
         <div class="chatbot-header">
           <div style="font-size:1.8rem">🤖</div>
-          <div><h4>FreshBot</h4><p>Always active • Online</p></div>
+          <div><h4>FreshBot AI</h4><p>Always active • Smart Support</p></div>
         </div>
         <div class="chatbot-messages" id="chatbot-messages">
-          <div class="chat-msg bot">Hi there! I'm FreshBot. How can I help you shop today? 🥦. Try asking "What should I buy for breakfast?"</div>
+          <div class="chat-msg bot">Initializing FreshBot AI Engine... 🔋</div>
         </div>
         <div class="chatbot-input">
-          <input type="text" id="chatbot-input" placeholder="Ask me anything...">
+          <input type="text" id="chatbot-input" placeholder="Ask anything about groceries or orders...">
           <button class="chatbot-send" id="chatbot-send">✈️</button>
         </div>
       </div>
@@ -1485,109 +1485,69 @@ const App = {
     const send = document.getElementById('chatbot-send');
     const msgs = document.getElementById('chatbot-messages');
 
-    toggle.addEventListener('click', () => {
-      const isOpen = win.style.display === 'flex';
-      win.style.display = isOpen ? 'none' : 'flex';
-      toggle.classList.toggle('active', !isOpen);
-      if(!isOpen) input.focus();
-    });
+    let historyLoaded = false;
 
     const addMsg = (text, isBot = true) => {
       const msg = document.createElement('div');
       msg.className = `chat-msg ${isBot ? 'bot' : 'user'}`;
-      msg.textContent = text;
+      msg.innerHTML = text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
       msgs.appendChild(msg);
       msgs.scrollTop = msgs.scrollHeight;
+      return msg;
     };
+
+    const loadHistory = async () => {
+      if (!this.isLoggedIn()) {
+        msgs.innerHTML = '<div class="chat-msg bot">Hi! I\'m **FreshBot AI**. Please login to enable personalized shopping help and chat memory! 😊</div>';
+        return;
+      }
+      if (historyLoaded) return;
+      try {
+        const history = await API.getChatHistory();
+        msgs.innerHTML = '';
+        if (history.length === 0) {
+          addMsg("Hi! I'm your AI shopping assistant. Ask me anything about our products, deals, or your orders! 🚀");
+        } else {
+          history.forEach(m => addMsg(m.text, m.role === 'bot'));
+        }
+        historyLoaded = true;
+      } catch (err) {
+        addMsg("AI Engine offline... 🔌");
+      }
+    };
+
+    toggle.addEventListener('click', () => {
+      const isOpen = win.style.display === 'flex';
+      win.style.display = isOpen ? 'none' : 'flex';
+      toggle.classList.toggle('active', !isOpen);
+      if (!isOpen) {
+        loadHistory();
+        input.focus();
+      }
+    });
 
     const handleChat = async () => {
       const q = input.value.trim();
-      if(!q) return;
+      if (!q) return;
+      
       addMsg(q, false);
       input.value = '';
+      const typing = addMsg("AI is thinking...", true);
 
       try {
-        const products = await API.getProducts();
-        const lq = q.toLowerCase();
-        let reply = "I'm sorry, I'm still learning. Try asking about a product price or health tips! 🍎";
-
-        const healthTips = {
-          'apple': 'Apples are high in Vitamin C and fiber, making them perfect for heart health! 🍎',
-          'orange': 'Oranges are packed with Vitamin C and antioxidants to boost your immunity! 🍊',
-          'banana': 'Bananas are rich in Potassium and great for quick energy! 🍌',
-          'milk': 'Fresh milk is an excellent source of Calcium and Vitamin D for strong bones! 🥛',
-          'spinach': 'Spinach is a superfood rich in Iron, Folate, and Vitamin K! 🥬',
-          'broccoli': 'Broccoli is nutrient-dense and high in fiber and Vitamin C! 🥦',
-          'carrot': 'Carrots are loaded with Beta-carotene and Vitamin A for eye health! 🥕',
-          'salmon': 'Salmon is rich in Omega-3 fatty acids, excellent for your heart and brain! 🐟',
-          'egg': 'Eggs provide high-quality protein and essential B-vitamins! 🥚',
-          'mango': 'Mangoes are high in Vitamin A and C, great for skin and digestion! 🥭',
-          'chicken': 'Chicken is a lean source of protein to help build and repair muscles! 🍗',
-          'almond': 'Almonds are heart-healthy with good fats and Vitamin E! 🥜',
-          'curd': 'Curd/Yogurt contains probiotics that improve gut health! 🥣',
-          'pantry': 'Our pantry staples are sourced from organic farms ensuring high nutritional value!'
-        };
-
-        const nutritionData = {
-          'apple': 'Calories: 95, Fat: 0.3g, Carbs: 25g',
-          'banana': 'Calories: 105, Fat: 0.4g, Protein: 1.3g',
-          'orange': 'Calories: 62, Fat: 0.2g, Vitamin C: 70mg',
-          'milk': 'Calories: 150 (per cup), Fat: 8g, Protein: 8g',
-          'chicken': 'Calories: 165 (per 100g), Fat: 3.6g, Protein: 31g',
-          'salmon': 'Calories: 208 (per 100g), Fat: 13g, Protein: 20g',
-          'egg': 'Calories: 78, Fat: 5g, Protein: 6g',
-          'spinach': 'Calories: 23 (per 100g), Fat: 0.4g, Protein: 2.9g',
-          'broccoli': 'Calories: 34 (per 100g), Fat: 0.4g, Protein: 2.8g',
-          'mango': 'Calories: 202, Fat: 1.3g, Fiber: 5g'
-        };
-
-        const found = products.find(p => lq.includes(p.name.toLowerCase()));
-        
-        // Health / Vitamin checks
-        const healthKeywords = ['health', 'benefit', 'vitamin', 'good for', 'nutrition', 'healthy', 'why should i buy'];
-        const isHealthQuery = healthKeywords.some(k => lq.includes(k));
-        
-        // Calorie / Fat / Macro checks
-        const macroKeywords = ['calorie', 'fat', 'protein', 'carbs', 'macros', 'energy', 'diet'];
-        const isMacroQuery = macroKeywords.some(k => lq.includes(k));
-
-        if (found && (isHealthQuery || isMacroQuery)) {
-          const key = Object.keys(healthTips).find(k => found.name.toLowerCase().includes(k));
-          const healthText = healthTips[key] || `${found.name} is a healthy, fresh choice! ✨`;
-          const nutritionText = nutritionData[key] || 'Detailed macro data for this specific product is coming soon!';
-          reply = `${healthText}\n\n📊 Nutritional Info:\n${nutritionText}`;
-        } else if (found && (lq.includes('price') || lq.includes('much') || lq.includes('cost'))) {
-          reply = `The ${found.name} is ₹${found.price.toFixed(2)} / ${found.unit}. It's currently ${found.inStock ? 'in stock' : 'out of stock'}. 🛒`;
-        } else if (found) {
-          reply = `${found.name}: ${found.description} (₹${found.price.toFixed(2)}). It's very fresh! ✨`;
-        } else if (isHealthQuery || isMacroQuery) {
-          reply = "Most of our produce is low in calories and high in nutrients! For example, Spinach (23 cal/100g) is very low-fat, while Salmon (208 cal/100g) is a powerhouse of protein and healthy fats. Which item are you looking for? 🥗";
-        } else if (lq.includes('breakfast')) {
-          const item = products.find(p => p.name.includes('Bread') || p.name.includes('Milk'));
-          reply = `For breakfast, I recommend our ${item ? item.name : 'Bananas'} and maybe some whole milk! 🥣`;
-        } else if (lq.includes('deal') || lq.includes('offer') || lq.includes('coupon')) {
-          reply = "Use 'SAVE10' for 10% off on orders above ₹500! 🎟️";
-        } else if (lq.includes('hi') || lq.includes('hello')) {
-          reply = "Hello! I'm FreshBot. Ask me about any product price, health benefits, or calories (e.g., 'How many calories in a Banana?')! 👋";
-        } else if (lq.includes('order') || lq.includes('track')) {
-          reply = "You can track your active orders under the 'Orders' section in the top menu! 📦";
-        } else if (lq.includes('delivery')) {
-          reply = "We deliver everything within 30-45 minutes to keep it fresh! 🚚💨";
-        } else if (lq.includes('categories') || lq.includes('what do you have')) {
-          const cats = [...new Set(products.map(p=>p.category))];
-          reply = `We have: ${cats.join(', ')}. Which one are you looking for? 🥦`;
-        }
-
+        const res = await API.sendChatMessage(q);
         setTimeout(() => {
-          addMsg(reply, true);
+          typing.remove();
+          addMsg(res.reply, true);
         }, 600);
       } catch (err) {
-        setTimeout(() => addMsg("I'm having trouble connecting to the store right now. Please try again later! 🔌", true), 600);
+        typing.remove();
+        addMsg("Oops! AI Engine disconnected. Please try again! 🔌🤖");
       }
     };
 
     send.addEventListener('click', handleChat);
-    input.addEventListener('keypress', (e) => { if(e.key === 'Enter') handleChat(); });
+    input.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleChat(); });
   },
 
   async buyNow(id, varName, varPrice, qty) {
