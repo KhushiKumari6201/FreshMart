@@ -1,170 +1,186 @@
-const fs = require('fs');
+const Product = require('./Product');
+const User = require('./User');
+const Order = require('./Order');
+const Chat = require('./Chat');
+const Coupon = require('./Coupon');
 const path = require('path');
+const fs = require('fs');
 
 class Store {
   constructor() {
-    this.products = [];
-    this.carts = {};       // keyed by username
-    this.wishlists = {}; // username: [productIds]
-    this.orders = [];
-    this.users = [];
-    this.coupons = [
-      { code: 'SAVE10', discount: 10, minAmount: 500, type: 'percent' },
-      { code: 'FRESH20', discount: 20, minAmount: 800, type: 'percent' },
-      { code: 'WELCOME50', discount: 50, minAmount: 0, type: 'flat' }
-    ];
-    this.chats = {}; // username: [messages]
-    this.orderIdCounter = 1000;
-    this.productIdCounter = 100;
-    this.loadData(); // This will load all data including products, chats, etc.
-    this.seedAdmin();
+    this.seedStarted = false;
+    // We will ensure data is seeded when needed.
   }
 
-  loadData() {
-    this.dbPath = path.join(__dirname, '..', 'data', 'db.json');
-    this.productsPath = path.join(__dirname, '..', 'data', 'products.json');
-    
-    // Load Products
+  async seedDataIfNeeded() {
+    if (this.seedStarted) return;
+    this.seedStarted = true;
     try {
-      if (fs.existsSync(this.productsPath)) {
-        this.products = JSON.parse(fs.readFileSync(this.productsPath, 'utf8'));
-        this.productIdCounter = Math.max(...this.products.map(p => p.id), 100) + 1;
-      }
-    } catch (e) { console.error('Products load failed'); }
+      const count = await Product.countDocuments();
+      if (count === 0) {
+        console.log('🌱 Seeding initial data from JSON files...');
+        const productsPath = path.join(__dirname, '..', 'data', 'products.json');
+        const dbPath = path.join(__dirname, '..', 'data', 'db.json');
 
-    // Load DB
-    try {
-      if (fs.existsSync(this.dbPath)) {
-        const db = JSON.parse(fs.readFileSync(this.dbPath, 'utf8'));
-        this.users = db.users || [];
-        this.orders = db.orders || [];
-        this.wishlists = db.wishlists || {};
-        this.chats = db.chats || {};
-        this.carts = db.carts || {};
-        this.orderIdCounter = Math.max(...this.orders.map(o => o.id), 1000) + 1;
-      }
-    } catch (e) { console.error('DB load failed'); }
-  }
+        if (fs.existsSync(productsPath)) {
+          const products = JSON.parse(fs.readFileSync(productsPath, 'utf8'));
+          await Product.insertMany(products);
+          console.log(`✅ Loaded ${products.length} products`);
+        }
 
-  saveData() {
-    try {
-      const db = {
-        users: this.users,
-        orders: this.orders,
-        wishlists: this.wishlists,
-        chats: this.chats,
-        carts: this.carts
-      };
-      fs.writeFileSync(this.dbPath, JSON.stringify(db, null, 2));
+        if (fs.existsSync(dbPath)) {
+          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+          if (db.users && Array.isArray(db.users)) {
+            // Deduplicate local users list before inserting
+            const uniqueUsers = [];
+            const usernames = new Set();
+            for (const u of db.users) {
+              const uname = u.username.toLowerCase();
+              if (!usernames.has(uname)) {
+                usernames.add(uname);
+                uniqueUsers.push(u);
+              }
+            }
+            // Use try-catch or ordered:false if you want to skip duplicates
+            try {
+              await User.insertMany(uniqueUsers, { ordered: false });
+            } catch (e) {
+              console.warn('Some users were already present/duplicates, skipped.');
+            }
+          }
+          if (db.orders && Array.isArray(db.orders)) {
+             try {
+              await Order.insertMany(db.orders, { ordered: false });
+            } catch (e) {
+              console.warn('Some orders were already present/duplicates, skipped.');
+            }
+          }
+          // Migrate coupons too
+          const initialCoupons = [
+            { code: 'SAVE10', discount: 0.1, minAmount: 500, type: 'percent' },
+            { code: 'FRESH20', discount: 0.2, minAmount: 800, type: 'percent' },
+            { code: 'WELCOME50', discount: 50, minAmount: 0, type: 'flat' }
+          ];
+          try {
+            await Coupon.insertMany(initialCoupons, { ordered: false });
+          } catch (e) {}
+          console.log('✅ Loaded database entries');
+        }
+      }
+      
+      // Ensure admin exists
+      const admin = await User.findOne({ role: 'admin' });
+      if (!admin) {
+        await User.create({
+          username: 'admin',
+          password: 'admin123',
+          name: 'Administrator',
+          role: 'admin'
+        });
+        console.log('✅ Created default admin account');
+      }
+
+      // Ensure coupons exist if missing
+      const couponCount = await Coupon.countDocuments();
+      if (couponCount === 0) {
+         await Coupon.insertMany([
+          { code: 'SAVE10', discount: 0.1, minAmount: 500, type: 'percent' },
+          { code: 'FRESH20', discount: 0.2, minAmount: 800, type: 'percent' },
+          { code: 'WELCOME50', discount: 50, minAmount: 0, type: 'flat' }
+        ]);
+      }
     } catch (e) {
-      console.error('Failed to save data:', e);
+      console.error('❌ Seeding failed:', e);
     }
   }
 
-  seedAdmin() {
-    this.users.push({
-      username: 'admin',
-      password: 'admin123',
-      name: 'Administrator',
-      role: 'admin',
-      createdAt: new Date().toISOString()
-    });
-  }
-
-  // ── Chat AI & Storage ───────────────────────────
-  getChatHistory(username) {
+  // ── Chat ─────────────────────────────────────────
+  async getChatHistory(username) {
     if (!username) return [];
-    return this.chats[username] || [];
+    const chat = await Chat.findOne({ username });
+    return chat ? chat.messages : [];
   }
 
-  saveChatMessage(username, text, role) {
+  async saveChatMessage(username, text, role) {
     if (!username) return;
-    if (!this.chats[username]) this.chats[username] = [];
-    this.chats[username].push({ text, role, time: new Date() });
-    // Keep only last 50 messages
-    if (this.chats[username].length > 50) this.chats[username].shift();
-    this.saveData();
+    let chat = await Chat.findOne({ username });
+    if (!chat) chat = new Chat({ username, messages: [] });
+    chat.messages.push({ text, role, time: new Date() });
+    if (chat.messages.length > 50) chat.messages.shift();
+    await chat.save();
   }
 
-  // ── Database ─────────────────────────────────────
   // ── Auth ──────────────────────────────────────
-  register(username, password, name) {
+  async register(username, password, name) {
     if (!username || !password || !name) return { error: 'All fields are required' };
     if (username.length < 3) return { error: 'Username must be at least 3 characters' };
     if (password.length < 4) return { error: 'Password must be at least 4 characters' };
-    if (this.users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
-      return { error: 'Username already exists' };
-    }
-    const user = {
+    
+    const existing = await User.findOne({ username: username.toLowerCase() });
+    if (existing) return { error: 'Username already exists' };
+
+    const user = await User.create({
       username: username.toLowerCase(),
       password,
       name,
       role: 'user',
-      createdAt: new Date().toISOString()
-    };
-    this.users.push(user);
-    this.carts[user.username] = { items: [] };
+      cart: { items: [] }
+    });
     return { username: user.username, name: user.name, role: user.role };
   }
 
-  login(username, password) {
+  async login(username, password) {
     if (!username || !password) return { error: 'Username and password required' };
-    const user = this.users.find(
-      u => u.username.toLowerCase() === username.toLowerCase() && u.password === password
-    );
+    const user = await User.findOne({ username: username.toLowerCase(), password });
     if (!user) return { error: 'Invalid username or password' };
     return { username: user.username, name: user.name, role: user.role };
   }
 
-  getUser(username) {
-    const user = this.users.find(u => u.username === username);
+  async getUser(username) {
+    const user = await User.findOne({ username });
     if (!user) return null;
     return { username: user.username, name: user.name, role: user.role };
   }
 
   // ── Products ──────────────────────────────────
-  getAllProducts(category, search) {
-    let results = this.products.filter(p => !p.deleted);
-    if (category) {
-      results = results.filter(p => p.category.toLowerCase() === category.toLowerCase());
-    }
+  async getAllProducts(category, search) {
+    let query = { deleted: false };
+    if (category) query.category = { $regex: new RegExp('^' + category + '$', 'i') };
     if (search) {
-      const q = search.toLowerCase();
-      results = results.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        p.description.toLowerCase().includes(q)
-      );
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
     }
-    return results;
+    return await Product.find(query).sort({ id: 1 }).lean();
   }
 
-  getProductById(id) {
-    return this.products.find(p => p.id === parseInt(id) && !p.deleted);
+  async getProductById(id) {
+    return await Product.findOne({ id: parseInt(id), deleted: false }).lean();
   }
 
-  rateProduct(productId, rating) {
-    const product = this.getProductById(productId);
+  async rateProduct(productId, rating) {
+    const product = await Product.findOne({ id: parseInt(productId) });
     if (!product) return { error: 'Product not found' };
-    if (!product.ratingsCount) {
-      product.ratingsCount = 10; // Base count for realism
-      product.ratingSum = (product.rating || 4.5) * 10;
-    }
-    product.ratingSum += parseFloat(rating);
-    product.ratingsCount += 1;
+    
+    product.ratingSum = (product.ratingSum || 0) + parseFloat(rating);
+    product.ratingsCount = (product.ratingsCount || 0) + 1;
     product.rating = parseFloat((product.ratingSum / product.ratingsCount).toFixed(1));
-    this.saveData(); // PERSIST TO FILE
+    await product.save();
     return { id: product.id, rating: product.rating, ratingsCount: product.ratingsCount };
   }
 
-  getCategories() {
-    const cats = [...new Set(this.products.filter(p => !p.deleted).map(p => p.category))];
-    return cats.sort();
+  async getCategories() {
+    return await Product.distinct('category', { deleted: false });
   }
 
   // Admin product CRUD
-  addProduct(data) {
-    const product = {
-      id: this.productIdCounter++,
+  async addProduct(data) {
+    const lastProduct = await Product.findOne().sort({ id: -1 });
+    const nextId = lastProduct ? lastProduct.id + 1 : 100;
+
+    const product = await Product.create({
+      id: nextId,
       name: data.name,
       category: data.category,
       price: parseFloat(data.price),
@@ -172,14 +188,14 @@ class Store {
       image: data.image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&h=300&fit=crop&auto=format',
       description: data.description || '',
       inStock: data.inStock !== false
-    };
-    this.products.push(product);
+    });
     return product;
   }
 
-  updateProduct(id, data) {
-    const product = this.products.find(p => p.id === id);
+  async updateProduct(id, data) {
+    const product = await Product.findOne({ id: parseInt(id) });
     if (!product) return { error: 'Product not found' };
+    
     if (data.name) product.name = data.name;
     if (data.category) product.category = data.category;
     if (data.price !== undefined) product.price = parseFloat(data.price);
@@ -187,167 +203,184 @@ class Store {
     if (data.image) product.image = data.image;
     if (data.description !== undefined) product.description = data.description;
     if (data.inStock !== undefined) product.inStock = data.inStock;
+    
+    await product.save();
     return product;
   }
 
-  deleteProduct(id) {
-    const product = this.products.find(p => p.id === id);
+  async deleteProduct(id) {
+    const product = await Product.findOne({ id: parseInt(id) });
     if (!product) return { error: 'Product not found' };
     product.deleted = true;
+    await product.save();
     return { success: true };
   }
 
-  getAllProductsAdmin() {
-    return this.products.filter(p => !p.deleted);
+  async getAllProductsAdmin() {
+    return await Product.find({ deleted: false }).sort({ id: 1 }).lean();
   }
 
-  // ── Cart (per-user) ───────────────────────────
-  _getUserCart(username) {
-    if (!this.carts[username]) this.carts[username] = { items: [] };
-    return this.carts[username];
+  // ── Cart ───────────────────────────────────────
+  async _getUser(username) {
+    let user = await User.findOne({ username: username.toLowerCase() });
+    if (!user) throw new Error('User not found');
+    if (!user.cart) user.cart = { items: [] };
+    return user;
   }
 
-  getCart(username) {
-    const cart = this._getUserCart(username);
-    return {
-      items: cart.items.map(item => {
-        const product = this.getProductById(item.productId);
-        const price = item.variationPrice !== undefined ? item.variationPrice : (product ? product.price : 0);
-        const nameSuffix = item.variationName && item.variationName !== 'Standard' ? ` (${item.variationName})` : '';
-        return {
-          ...item,
-          product: product ? { ...product, name: product.name + nameSuffix, price } : null,
-          subtotal: +(price * item.quantity).toFixed(2)
-        };
-      }),
-      total: this.getCartTotal(username)
-    };
-  }
+  async getCart(username) {
+    const user = await this._getUser(username);
+    const cartItems = [];
+    let total = 0;
 
-  getCartTotal(username) {
-    const cart = this._getUserCart(username);
-    return +cart.items.reduce((sum, item) => {
-      const product = this.getProductById(item.productId);
+    for (const item of user.cart.items) {
+      const product = await this.getProductById(item.productId);
       const price = item.variationPrice !== undefined ? item.variationPrice : (product ? product.price : 0);
-      return sum + (price * item.quantity);
-    }, 0).toFixed(2);
+      const nameSuffix = item.variationName && item.variationName !== 'Standard' ? ` (${item.variationName})` : '';
+      const subtotal = +(price * item.quantity).toFixed(2);
+      
+      cartItems.push({
+        ...item.toObject(),
+        product: product ? { ...product, name: product.name + nameSuffix, price } : null,
+        subtotal
+      });
+      total += subtotal;
+    }
+
+    return { items: cartItems, total: +total.toFixed(2) };
   }
 
-  getCartItemCount(username) {
-    const cart = this._getUserCart(username);
-    return cart.items.reduce((sum, item) => sum + item.quantity, 0);
+  async getCartItemCount(username) {
+    const user = await this._getUser(username);
+    return user.cart.items.reduce((sum, item) => sum + item.quantity, 0);
   }
 
-  addToCart(username, productId, quantity = 1, variationName = null, variationPrice = null) {
-    const product = this.getProductById(productId);
+  async addToCart(username, productId, quantity = 1, variationName = null, variationPrice = null) {
+    const product = await this.getProductById(productId);
     if (!product) return { error: 'Product not found' };
     if (!product.inStock) return { error: 'Product is out of stock' };
 
-    const cart = this._getUserCart(username);
+    const user = await this._getUser(username);
     const priceToUse = variationPrice !== null ? parseFloat(variationPrice) : product.price;
     const vName = variationName || 'Standard';
 
-    const existing = cart.items.find(i => i.productId === productId && i.variationName === vName);
+    const existing = user.cart.items.find(i => i.productId === parseInt(productId) && i.variationName === vName);
     if (existing) {
       existing.quantity += quantity;
     } else {
-      cart.items.push({ 
+      user.cart.items.push({ 
         id: Date.now() + Math.random().toString(36).substring(2, 9), 
-        productId, 
+        productId: parseInt(productId), 
         quantity, 
         variationName: vName, 
         variationPrice: priceToUse 
       });
     }
-    this.saveData();
-    return this.getCart(username);
+    await user.save();
+    return await this.getCart(username);
   }
 
-  updateCartItem(username, cartItemId, quantity) {
-    const cart = this._getUserCart(username);
-    const idx = cart.items.findIndex(i => i.id === cartItemId || i.productId === cartItemId);
+  async updateCartItem(username, cartItemId, quantity) {
+    const user = await this._getUser(username);
+    const idx = user.cart.items.findIndex(i => i.id === cartItemId || String(i.productId) === String(cartItemId));
     if (idx === -1) return { error: 'Item not in cart' };
 
     if (quantity <= 0) {
-      cart.items.splice(idx, 1);
+      user.cart.items.splice(idx, 1);
     } else {
-      cart.items[idx].quantity = quantity;
+      user.cart.items[idx].quantity = quantity;
     }
-    this.saveData();
-    return this.getCart(username);
+    await user.save();
+    return await this.getCart(username);
   }
 
-  removeFromCart(username, cartItemId) {
-    const cart = this._getUserCart(username);
-    const idx = cart.items.findIndex(i => i.id === cartItemId || i.productId === cartItemId);
+  async removeFromCart(username, cartItemId) {
+    const user = await this._getUser(username);
+    const idx = user.cart.items.findIndex(i => i.id === cartItemId || String(i.productId) === String(cartItemId));
     if (idx === -1) return { error: 'Item not in cart' };
-    cart.items.splice(idx, 1);
-    this.saveData();
-    return this.getCart(username);
+    user.cart.items.splice(idx, 1);
+    await user.save();
+    return await this.getCart(username);
   }
 
-  // ── Wishlist (per-user) ────────────────────────
-  _getUserWishlist(username) {
-    if (!this.wishlists[username]) this.wishlists[username] = [];
-    return this.wishlists[username];
-  }
-
-  getWishlist(username) {
-    const list = this._getUserWishlist(username);
-    return list.map(id => this.getProductById(id)).filter(p => !!p);
-  }
-
-  toggleWishlist(username, productId) {
-    const list = this._getUserWishlist(username);
-    const idx = list.indexOf(productId);
-    if (idx === -1) {
-      list.push(productId);
-      const res = idx === -1 ? { added: true } : { added: false };
-      this.saveData();
-      return res;
+  // ── Wishlist ──────────────────────────────────
+  async getWishlist(username) {
+    const user = await this._getUser(username);
+    const products = [];
+    for (const id of user.wishlist) {
+      const p = await this.getProductById(id);
+      if (p) products.push(p);
     }
+    return products;
+  }
+
+  async toggleWishlist(username, productId) {
+    const user = await this._getUser(username);
+    const pid = parseInt(productId);
+    const idx = user.wishlist.indexOf(pid);
+    let added = false;
+    if (idx === -1) {
+      user.wishlist.push(pid);
+      added = true;
+    } else {
+      user.wishlist.splice(idx, 1);
+      added = false;
+    }
+    await user.save();
+    return { added };
   }
 
   // ── Coupons ────────────────────────────────────
-  validateCoupon(code, amount) {
-    const coupon = this.coupons.find(c => c.code.toUpperCase() === code.toUpperCase());
+  async validateCoupon(code, amount) {
+    const coupon = await Coupon.findOne({ code: code.toUpperCase() });
     if (!coupon) return { error: 'Invalid coupon code' };
     if (amount < coupon.minAmount) return { error: `Minimum order amount for this coupon is ₹${coupon.minAmount}` };
-    return { success: true, discount: +(amount * coupon.discount).toFixed(2), finalAmount: +(amount * (1 - coupon.discount)).toFixed(2) };
+    
+    let discount = 0;
+    if (coupon.type === 'percent') {
+      discount = +(amount * coupon.discount).toFixed(2);
+    } else {
+      discount = coupon.discount;
+    }
+    
+    return { 
+      success: true, 
+      discount, 
+      finalAmount: +(amount - discount).toFixed(2) 
+    };
   }
 
   // ── Orders ────────────────────────────────────
-  placeOrder(username, customerName, address, phone, paymentMethod, paymentDetails, couponCode = null) {
-    const cart = this._getUserCart(username);
+  async placeOrder(username, customerName, address, phone, paymentMethod, paymentDetails, couponCode = null) {
+    const user = await this._getUser(username);
+    const cart = await this.getCart(username);
     if (cart.items.length === 0) return { error: 'Cart is empty' };
 
-    const originalTotal = this.getCartTotal(username);
+    const originalTotal = cart.total;
     let discount = 0;
     let finalTotal = originalTotal;
 
     if (couponCode) {
-      const v = this.validateCoupon(couponCode, originalTotal);
+      const v = await this.validateCoupon(couponCode, originalTotal);
       if (v.error) return v;
       discount = v.discount;
       finalTotal = v.finalAmount;
     }
 
-    const order = {
-      id: ++this.orderIdCounter,
+    const lastOrder = await Order.findOne().sort({ id: -1 });
+    const nextId = lastOrder ? lastOrder.id + 1 : 1001;
+
+    const order = await Order.create({
+      id: nextId,
       username,
-      items: cart.items.map(item => {
-        const product = this.getProductById(item.productId);
-        const price = item.variationPrice !== undefined ? item.variationPrice : (product ? product.price : 0);
-        const nameSuffix = item.variationName && item.variationName !== 'Standard' ? ` (${item.variationName})` : '';
-        return {
-          productId: item.productId,
-          name: (product ? product.name : 'Unknown Product') + nameSuffix,
-          image: product ? product.image : '',
-          price: price,
-          quantity: item.quantity,
-          subtotal: +(price * item.quantity).toFixed(2)
-        };
-      }),
+      items: cart.items.map(item => ({
+        productId: item.productId,
+        name: item.product ? item.product.name : 'Unknown Product',
+        image: item.product ? item.product.image : '',
+        price: item.variationPrice,
+        quantity: item.quantity,
+        subtotal: item.subtotal
+      })),
       total: finalTotal,
       discount: discount,
       couponCode: couponCode,
@@ -357,54 +390,47 @@ class Store {
       paymentMethod: paymentMethod || 'cod',
       paymentDetails: paymentDetails || {},
       status: 'ordered',
-      statusHistory: [
-        { status: 'ordered', time: new Date().toISOString() }
-      ],
-      paymentStatus: paymentMethod === 'cod' ? 'pending' : 'paid',
-      createdAt: new Date().toISOString()
-    };
+      statusHistory: [{ status: 'ordered', time: new Date() }],
+      paymentStatus: paymentMethod === 'cod' ? 'pending' : 'paid'
+    });
 
-    this.orders.push(order);
-    this.carts[username] = { items: [] };
-    this.saveData();
+    user.cart.items = [];
+    await user.save();
     return order;
   }
 
-  getOrders(username) {
-    return this.orders
-      .filter(o => o.username === username)
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  async getOrders(username) {
+    return await Order.find({ username }).sort({ createdAt: -1 }).lean();
   }
 
-  // Admin
-  getAllOrders() {
-    return this.orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  async getAllOrders() {
+    return await Order.find().sort({ createdAt: -1 }).lean();
   }
 
-  updateOrderStatus(orderId, status) {
-    const order = this.orders.find(o => o.id === parseInt(orderId));
+  async updateOrderStatus(orderId, status) {
+    const order = await Order.findOne({ id: parseInt(orderId) });
     if (!order) return { error: 'Order not found' };
     order.status = status;
-    if (!order.statusHistory) order.statusHistory = [];
-    order.statusHistory.push({ status, time: new Date().toISOString() });
+    order.statusHistory.push({ status, time: new Date() });
+    await order.save();
     return order;
   }
 
   // ── Admin Stats ───────────────────────────────
-  getAdminStats() {
-    const totalProducts = this.products.filter(p => !p.deleted).length;
-    const totalOrders = this.orders.length;
-    const totalRevenue = this.orders.reduce((sum, o) => sum + o.total, 0);
-    const totalUsers = this.users.filter(u => u.role === 'user').length;
-    const recentOrders = this.orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
+  async getAdminStats() {
+    const totalProducts = await Product.countDocuments({ deleted: false });
+    const orders = await Order.find();
+    const totalOrders = orders.length;
+    const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
+    const totalUsers = await User.countDocuments({ role: 'user' });
+    const recentOrders = await Order.find().sort({ createdAt: -1 }).limit(5).lean();
+    
     const ordersByStatus = {
-      confirmed: this.orders.filter(o => o.status === 'confirmed').length,
-      preparing: this.orders.filter(o => o.status === 'preparing').length,
-      delivered: this.orders.filter(o => o.status === 'delivered').length,
-      cancelled: this.orders.filter(o => o.status === 'cancelled').length
     };
     return { totalProducts, totalOrders, totalRevenue, totalUsers, recentOrders, ordersByStatus };
   }
 }
 
-module.exports = new Store();
+const store = new Store();
+
+module.exports = store;
